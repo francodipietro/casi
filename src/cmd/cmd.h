@@ -1,0 +1,28 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+#ifndef CASI_CMD_H
+#define CASI_CMD_H
+
+#include "casi/casi.h"
+
+/*
+ * One entry per user-facing verb. `hidden` keeps plumbing (doctor, gc,
+ * conflicts) out of the main help without hiding it from the shell: the UX
+ * contract is that `casi --help` shows five commands and nothing more.
+ */
+typedef struct {
+    const char *name;
+    const char *summary;
+    const char *usage;
+    int       (*run)(int argc, char **argv);
+    bool        hidden;
+} casi_command;
+
+extern const casi_command casi_commands[];
+
+const casi_command *casi_command_lookup(const char *name);
+
+int casi_cmd_version(int argc, char **argv);
+int casi_cmd_help(int argc, char **argv);
+int casi_cmd_config(int argc, char **argv);
+
+#endif /* CASI_CMD_H */

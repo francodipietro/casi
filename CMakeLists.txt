@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+cmake_minimum_required(VERSION 3.20)
+
+project(casi
+    VERSION 0.1.0
+    DESCRIPTION "Coding Assistant Session Interchange"
+    HOMEPAGE_URL "https://github.com/francodipietro/casi"
+    LANGUAGES C)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+# gnu11 rather than strict c11: gives POSIX + BSD declarations (strdup, mkdir,
+# realpath, DT_DIR) uniformly on Linux and macOS without per-platform feature
+# macros. MSVC ignores the flag.
+set(CMAKE_C_EXTENSIONS ON)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+option(CASI_WERROR          "Treat compiler warnings as errors"        OFF)
+option(CASI_SANITIZE        "Build with ASan + UBSan"                  OFF)
+option(CASI_VENDOR_LIBGIT2  "Build libgit2 from source and link it in" OFF)
+option(CASI_BUILD_TESTS     "Build the test suite"                     ON)
+
+# ---------------------------------------------------------------- libgit2 ---
+# Preferred path: system libgit2 via pkg-config (brew / apt / pacman).
+# Fallback path (-DCASI_VENDOR_LIBGIT2=ON): pinned source build, used for the
+# static release binaries and for the Windows CI job.
+#
+# >= 1.9.2 is a hard floor: earlier versions have an arbitrary command
+# execution bug in the OpenSSH exec transport (see docs/DESIGN.md).
+set(CASI_LIBGIT2_MIN_VERSION 1.9.2)
+
+if(CASI_VENDOR_LIBGIT2)
+    include(FetchContent)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTS       OFF CACHE BOOL "" FORCE)
+    set(BUILD_CLI         OFF CACHE BOOL "" FORCE)
+    set(USE_SSH           "exec" CACHE STRING "" FORCE)
+    FetchContent_Declare(libgit2
+        GIT_REPOSITORY https://github.com/libgit2/libgit2.git
+        GIT_TAG        v1.9.7
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(libgit2)
+    # libgit2's packaged target does not export its include directory, so
+    # attach it here rather than making every consumer know the source layout.
+    target_include_directories(libgit2package
+        INTERFACE ${libgit2_SOURCE_DIR}/include)
+    add_library(casi::libgit2 ALIAS libgit2package)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET
+        libgit2>=${CASI_LIBGIT2_MIN_VERSION})
+    add_library(casi::libgit2 ALIAS PkgConfig::LIBGIT2)
+endif()
+
+# ------------------------------------------------------------- core library --
+# Everything except main() lives here so the tests can link it directly.
+add_library(casi_core STATIC
+    src/casi.c
+    src/util/error.c
+    src/util/buf.c
+    src/util/str.c
+    src/util/fs.c
+    src/util/log.c
+    src/util/paths.c
+    src/util/config.c
+)
+
+target_include_directories(casi_core
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_BINARY_DIR}/include
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(casi_core PUBLIC casi::libgit2)
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/include/casi/version.h
+    @ONLY)
+
+# ------------------------------------------------------------------ binary ---
+add_executable(casi
+    src/main.c
+    src/cmd/cmd_version.c
+    src/cmd/cmd_help.c
+    src/cmd/cmd_config.c
+)
+target_include_directories(casi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(casi PRIVATE casi_core)
+
+# ----------------------------------------------------------------- warnings --
+if(MSVC)
+    set(CASI_WARN_FLAGS /W4)
+    if(CASI_WERROR)
+        list(APPEND CASI_WARN_FLAGS /WX)
+    endif()
+else()
+    set(CASI_WARN_FLAGS
+        -Wall -Wextra -Wshadow -Wpointer-arith -Wwrite-strings
+        -Wstrict-prototypes -Wmissing-prototypes -Wvla)
+    if(CASI_WERROR)
+        list(APPEND CASI_WARN_FLAGS -Werror)
+    endif()
+endif()
+target_compile_options(casi_core PRIVATE ${CASI_WARN_FLAGS})
+target_compile_options(casi      PRIVATE ${CASI_WARN_FLAGS})
+
+target_compile_definitions(casi_core PRIVATE _FILE_OFFSET_BITS=64)
+
+if(CASI_SANITIZE)
+    if(MSVC)
+        message(WARNING "CASI_SANITIZE is not supported with MSVC; ignoring")
+    else()
+        set(CASI_SAN_FLAGS -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_compile_options(casi_core PUBLIC ${CASI_SAN_FLAGS})
+        target_link_options(casi_core    PUBLIC ${CASI_SAN_FLAGS})
+    endif()
+endif()
+
+# ------------------------------------------------------------------- tests ---
+if(CASI_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+# ----------------------------------------------------------------- install ---
+include(GNUInstallDirs)
+install(TARGETS casi RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
