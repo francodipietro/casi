@@ -80,11 +80,27 @@ int casi_fs_mkdir_p(const char *path)
         saved = work.ptr[i];
         work.ptr[i] = '\0';
 
-        if (mkdir(work.ptr, 0777) != 0 && errno != EEXIST) {
-            rc = casi_error_set(CASI_EIO, "cannot create directory %s: %s",
-                                work.ptr, strerror(errno));
-            casi_buf_dispose(&work);
-            return rc;
+        if (mkdir(work.ptr, 0777) != 0) {
+            casi_stat st;
+
+            if (errno != EEXIST) {
+                rc = casi_error_set(CASI_EIO, "cannot create directory %s: %s",
+                                    work.ptr, strerror(errno));
+                casi_buf_dispose(&work);
+                return rc;
+            }
+
+            /* Something is already there. It has to be a directory (or a
+             * symlink to one, which stat follows): otherwise the walk would
+             * blunder on and fail several components later with a far less
+             * obvious message. */
+            if (casi_fs_stat(work.ptr, &st) != CASI_OK || !st.is_dir) {
+                rc = casi_error_set(CASI_EEXISTS,
+                                    "cannot create directory %s: path exists "
+                                    "and is not a directory", work.ptr);
+                casi_buf_dispose(&work);
+                return rc;
+            }
         }
 
         work.ptr[i] = saved;
@@ -284,6 +300,11 @@ int casi_fs_join(casi_buf *out, const char *base, const char *rest)
         return rc;
 
     return casi_buf_puts(out, rest);
+}
+
+bool casi_fs_stdout_is_tty(void)
+{
+    return isatty(STDOUT_FILENO) ? true : false;
 }
 
 const char *casi_fs_home(void)

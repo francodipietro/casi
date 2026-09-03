@@ -1,12 +1,11 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 #include "casi/log.h"
+#include "casi/fs.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include <unistd.h>
 
 static casi_log_level g_level = CASI_LOG_NORMAL;
 static bool           g_color;
@@ -30,7 +29,7 @@ void casi_log_detect_color(void)
         return;
     }
 
-    g_color = isatty(STDOUT_FILENO) ? true : false;
+    g_color = casi_fs_stdout_is_tty();
 }
 
 static void emit(FILE *out, const char *prefix, const char *fmt, va_list ap)

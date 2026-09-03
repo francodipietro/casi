@@ -48,6 +48,28 @@ static void test_strvec_push_and_dispose(void)
     ASSERT_TRUE(v.items == NULL);
 }
 
+static void test_strvec_initial_capacity(void)
+{
+    casi_strvec v = CASI_STRVEC_INIT;
+    size_t i;
+
+    ASSERT_OK(casi_strvec_push(&v, "one"));
+    /* The first allocation is 8, not 16: growth doubles an existing capacity
+     * rather than doubling the base. */
+    ASSERT_EQ_INT(v.cap, 8);
+
+    for (i = 1; i < 8; i++)
+        ASSERT_OK(casi_strvec_push(&v, "filler"));
+    ASSERT_EQ_INT(v.cap, 8);
+
+    ASSERT_OK(casi_strvec_push(&v, "ninth"));
+    ASSERT_EQ_INT(v.cap, 16);
+    ASSERT_EQ_INT(v.len, 9);
+    ASSERT_EQ_STR(v.items[8], "ninth");
+
+    casi_strvec_dispose(&v);
+}
+
 static void test_strvec_push_owned(void)
 {
     casi_strvec v = CASI_STRVEC_INIT;
@@ -95,6 +117,7 @@ int main(void)
     RUN_TEST(test_strdup_and_strndup);
     RUN_TEST(test_prefix_and_suffix);
     RUN_TEST(test_strvec_push_and_dispose);
+    RUN_TEST(test_strvec_initial_capacity);
     RUN_TEST(test_strvec_push_owned);
     RUN_TEST(test_strvec_sort_is_byte_order);
     RUN_TEST(test_strvec_sort_empty);

@@ -156,6 +156,24 @@ static void test_missing_paths_report_notfound(void)
     casi_buf_dispose(&got);
 }
 
+static void test_mkdir_p_rejects_a_file_in_the_way(void)
+{
+    casi_buf blocker = CASI_BUF_INIT, under = CASI_BUF_INIT;
+
+    /* A regular file where a directory component should be must fail loudly at
+     * that component, not be swallowed as EEXIST and blow up later. */
+    ASSERT_OK(tmp_path(&blocker, "blocked"));
+    ASSERT_OK(casi_fs_write_file_atomic(casi_buf_cstr(&blocker), "x", 1));
+
+    ASSERT_RC(casi_fs_mkdir_p(casi_buf_cstr(&blocker)), CASI_EEXISTS);
+
+    ASSERT_OK(tmp_path(&under, "blocked/deeper/still"));
+    ASSERT_RC(casi_fs_mkdir_p(casi_buf_cstr(&under)), CASI_EEXISTS);
+
+    casi_buf_dispose(&blocker);
+    casi_buf_dispose(&under);
+}
+
 static void test_listdir_is_sorted_and_skips_dots(void)
 {
     casi_buf dir = CASI_BUF_INIT, f = CASI_BUF_INIT;
@@ -199,6 +217,7 @@ int main(void)
     RUN_TEST(test_write_replaces_and_leaves_no_temp);
     RUN_TEST(test_empty_file);
     RUN_TEST(test_missing_paths_report_notfound);
+    RUN_TEST(test_mkdir_p_rejects_a_file_in_the_way);
     RUN_TEST(test_listdir_is_sorted_and_skips_dots);
 
     status = casi_test_report("fs");

@@ -33,10 +33,12 @@ int casi_cmd_config(int argc, char **argv)
     casi_config *cfg = NULL;
     int rc;
 
-    if (argc < 1) {
-        casi_err("usage: %s", casi_command_lookup("config")->usage);
-        return CASI_EINVAL;
-    }
+    /* Report through the error channel, never directly: main() prints
+     * casi_error_last() for any non-zero return, so printing here too would
+     * emit the message twice. */
+    if (argc < 1)
+        return casi_error_set(CASI_EINVAL, "usage: %s",
+                              casi_command_lookup("config")->usage);
 
     if ((rc = casi_config_open(&cfg)) != CASI_OK)
         return rc;

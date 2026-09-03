@@ -28,3 +28,7 @@ set_tests_properties(cli_help PROPERTIES
 
 add_test(NAME cli_unknown_command COMMAND casi definitely-not-a-command)
 set_tests_properties(cli_unknown_command PROPERTIES WILL_FAIL TRUE)
+
+# A failing command prints one error line, never the "unknown error" placeholder.
+add_test(NAME cli_errors
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/cli_errors.sh $<TARGET_FILE:casi>)

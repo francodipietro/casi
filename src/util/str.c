@@ -47,10 +47,13 @@ static int strvec_grow(casi_strvec *v)
     if (v->len < v->cap)
         return CASI_OK;
 
-    cap = v->cap ? v->cap : 8;
-    if (cap > SIZE_MAX / 2 / sizeof(char *))
-        return casi_error_set(CASI_ENOMEM, "string vector too large");
-    cap *= 2;
+    if (v->cap == 0) {
+        cap = 8;
+    } else {
+        if (v->cap > SIZE_MAX / 2 / sizeof(char *))
+            return casi_error_set(CASI_ENOMEM, "string vector too large");
+        cap = v->cap * 2;
+    }
 
     p = realloc(v->items, cap * sizeof(char *));
     if (p == NULL)

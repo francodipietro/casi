@@ -35,10 +35,8 @@ int casi_cmd_help(int argc, char **argv)
         return CASI_OK;
     }
 
-    if ((cmd = casi_command_lookup(argv[0])) == NULL) {
-        casi_err("unknown command '%s'", argv[0]);
-        return CASI_EINVAL;
-    }
+    if ((cmd = casi_command_lookup(argv[0])) == NULL)
+        return casi_error_set(CASI_EINVAL, "unknown command '%s'", argv[0]);
 
     printf("usage: %s\n\n%s\n", cmd->usage, cmd->summary);
     return CASI_OK;

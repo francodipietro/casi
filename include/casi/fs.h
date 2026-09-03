@@ -55,6 +55,10 @@ int  casi_fs_join(casi_buf *out, const char *base, const char *rest);
 /* Writes the directory part of `path` into `out` ("." when there is none). */
 int  casi_fs_dirname(casi_buf *out, const char *path);
 
+/* Whether stdout is a terminal. Lives here rather than in the logger because
+ * isatty() is a syscall, and on Windows becomes _isatty()/GetConsoleMode(). */
+bool casi_fs_stdout_is_tty(void);
+
 /* The user's home directory. NULL only if the environment has none. */
 const char *casi_fs_home(void);
 
