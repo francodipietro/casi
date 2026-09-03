@@ -56,7 +56,10 @@ jobs:
       - run: cmake --preset static
       - run: cmake --build --preset static
       - name: Verify the exec SSH backend is what got linked
-        run: ./build/static/casi --version | grep -q 'ssh: exec'
+        # Block scalar, not a plain one: the ": " inside the grep pattern
+        # would otherwise read as a YAML mapping and break the whole file.
+        run: |
+          ./build/static/casi --version | grep -q 'ssh: exec'
 
   valgrind:
     name: valgrind
