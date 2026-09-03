@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / ${{ matrix.cc }} / ${{ matrix.preset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, cc: gcc,   preset: debug }
+          - { os: ubuntu-latest, cc: clang, preset: debug }
+          - { os: ubuntu-latest, cc: clang, preset: dev }
+          - { os: macos-latest,  cc: clang, preset: debug }
+          - { os: macos-latest,  cc: clang, preset: dev }
+    env:
+      CC: ${{ matrix.cc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libgit2-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake pkg-config libgit2
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  # The distro packages above give us the libssh2 path. Release binaries ship a
+  # vendored libgit2 built with the OpenSSH exec transport, so that has to be
+  # exercised too -- it is a different code path in casi_ssh_backend().
+  vendored:
+    name: vendored libgit2 (exec ssh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libssl-dev
+      - run: cmake --preset static
+      - run: cmake --build --preset static
+      - name: Verify the exec SSH backend is what got linked
+        # Block scalar, not a plain one: the ": " inside the grep pattern
+        # would otherwise read as a YAML mapping and break the whole file.
+        run: |
+          ./build/static/casi --version | grep -q 'ssh: exec'
+
+  valgrind:
+    name: valgrind
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libgit2-dev valgrind
+      - run: cmake --preset debug
+      - run: cmake --build --preset debug
+      - name: Run the unit tests under valgrind
+        # Driving valgrind directly rather than via `ctest -T memcheck`: that
+        # mode needs the CTest dashboard machinery that include(CTest) sets up,
+        # and this repo only calls enable_testing(). Explicit is also easier to
+        # read when it fails.
+        run: |
+          set -eu
+          status=0
+          for t in build/debug/tests/test_*; do
+            [ -x "$t" ] || continue
+            [ -f "$t" ] || continue
+            echo "== $t"
+            valgrind --leak-check=full --errors-for-leak-kinds=definite \
+                     --error-exitcode=1 "$t" || status=1
+          done
+          exit $status

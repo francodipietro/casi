@@ -1,0 +1,30 @@
+# Build
+build/
+build-*/
+out/
+*.o
+*.a
+*.so
+*.dylib
+compile_commands.json
+.cache/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+_deps/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Test scratch
+tests/tmp/
+
+# Claude Code personal settings
+.claude/settings.local.json
