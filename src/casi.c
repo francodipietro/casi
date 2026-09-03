@@ -25,8 +25,17 @@ const char *casi_ssh_backend(void)
     if ((git_libgit2_features() & GIT_FEATURE_SSH) == 0)
         return NULL;
 
+#if LIBGIT2_VERSION_MAJOR > 1 || \
+    (LIBGIT2_VERSION_MAJOR == 1 && LIBGIT2_VERSION_MINOR >= 9)
     backend = git_libgit2_feature_backend(GIT_FEATURE_SSH);
     return (backend != NULL && backend[0] != '\0') ? backend : "unknown";
+#else
+    /* git_libgit2_feature_backend() arrived in 1.9. Before 1.8 there was only
+     * one SSH backend, and CMake rejects the 1.8.x window outright, so
+     * reaching here means libssh2. */
+    (void)backend;
+    return "libssh2";
+#endif
 }
 
 int casi_backend_describe(casi_buf *out)

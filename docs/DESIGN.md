@@ -98,8 +98,21 @@ well get `libssh2` instead — Homebrew's build does — so `casi --version` and
 `casi doctor` report the backend in play, and the SSH credential and host-key
 callbacks exist to make the `libssh2` case work for plain hostnames.
 
-libgit2 ≥ 1.9.2 is a hard floor: earlier versions have an arbitrary command
-execution bug in the `exec` transport.
+### Version floor
+
+The floor is libgit2 **1.7** — what the code actually needs, and what
+Debian/Ubuntu ship (24.04 has 1.7.2).
+
+The security caveat is narrower than a blanket floor would imply. The `exec`
+transport was introduced in 1.8.0 and its arbitrary command execution bug was
+fixed in 1.9.2, so exactly `[1.8.0, 1.9.2)` is dangerous — anything older has
+no `exec` transport at all and cannot be affected. The build rejects precisely
+that window, with `-DCASI_ALLOW_UNSAFE_LIBGIT2=ON` as the documented escape for
+a packager who knows their build links libssh2.
+
+`git_libgit2_feature_backend()` is a 1.9 API, so it sits behind a
+`LIBGIT2_VERSION_*` guard. Below 1.9 there was only one backend, so casi reports
+`libssh2` without asking.
 
 ## Windows is not supported, but is not designed out
 

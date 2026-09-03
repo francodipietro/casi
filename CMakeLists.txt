@@ -26,9 +26,19 @@ option(CASI_BUILD_TESTS     "Build the test suite"                     ON)
 # Fallback path (-DCASI_VENDOR_LIBGIT2=ON): pinned source build, used for the
 # static release binaries and for the Windows CI job.
 #
-# >= 1.9.2 is a hard floor: earlier versions have an arbitrary command
-# execution bug in the OpenSSH exec transport (see docs/DESIGN.md).
-set(CASI_LIBGIT2_MIN_VERSION 1.9.2)
+# The floor is 1.7: that is what the code actually needs, and it is what
+# Debian/Ubuntu ship.
+#
+# The security caveat is narrower than a blanket floor would suggest. The
+# OpenSSH exec transport arrived in libgit2 1.8.0 and had an arbitrary command
+# execution bug fixed in 1.9.2, so exactly the [1.8.0, 1.9.2) window is
+# dangerous. Anything older has no exec transport at all and cannot be
+# affected. Rejecting only that window keeps casi buildable on stock distro
+# packages without waving the vulnerability through.
+set(CASI_LIBGIT2_MIN_VERSION 1.7.0)
+
+option(CASI_ALLOW_UNSAFE_LIBGIT2
+    "Build against a libgit2 whose OpenSSH exec transport is unpatched" OFF)
 
 if(CASI_VENDOR_LIBGIT2)
     include(FetchContent)
@@ -50,6 +60,24 @@ else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET
         libgit2>=${CASI_LIBGIT2_MIN_VERSION})
+
+    if(LIBGIT2_VERSION VERSION_GREATER_EQUAL 1.8.0 AND
+       LIBGIT2_VERSION VERSION_LESS 1.9.2 AND
+       NOT CASI_ALLOW_UNSAFE_LIBGIT2)
+        message(FATAL_ERROR
+            "libgit2 ${LIBGIT2_VERSION} may carry an unpatched arbitrary "
+            "command execution bug in its OpenSSH exec transport, fixed in "
+            "1.9.2. Upgrade, build with -DCASI_VENDOR_LIBGIT2=ON, or override "
+            "with -DCASI_ALLOW_UNSAFE_LIBGIT2=ON if you know this build uses "
+            "libssh2 instead.")
+    endif()
+
+    if(LIBGIT2_VERSION VERSION_LESS 1.9.0)
+        message(STATUS
+            "libgit2 ${LIBGIT2_VERSION} predates git_libgit2_feature_backend(); "
+            "the SSH backend will be reported as libssh2, the only one it has")
+    endif()
+
     add_library(casi::libgit2 ALIAS PkgConfig::LIBGIT2)
 endif()
 

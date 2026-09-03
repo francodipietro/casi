@@ -58,7 +58,7 @@ Your sessions are yours. casi has no server, no account and no telemetry.
 
 ## Building from source
 
-Requires a C11 compiler, CMake ≥ 3.20, pkg-config and libgit2 ≥ 1.9.2.
+Requires a C11 compiler, CMake ≥ 3.20, pkg-config and libgit2 ≥ 1.7.
 
 ```sh
 brew install cmake pkg-config libgit2        # macOS
@@ -74,6 +74,11 @@ For development, `--preset dev` adds ASan/UBSan and `-Werror`:
 ```sh
 cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 ```
+
+`--preset static` vendors libgit2 and builds it with the OpenSSH `exec`
+transport, producing a binary with no non-system dynamic dependencies. Reach for
+it if your distro's libgit2 links libssh2 and you need `~/.ssh/config` host
+aliases to resolve — `casi --version` tells you which backend you have.
 
 ## Roadmap
 

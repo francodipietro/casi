@@ -42,6 +42,22 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
 
+  # The distro packages above give us the libssh2 path. Release binaries ship a
+  # vendored libgit2 built with the OpenSSH exec transport, so that has to be
+  # exercised too -- it is a different code path in casi_ssh_backend().
+  vendored:
+    name: vendored libgit2 (exec ssh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libssl-dev
+      - run: cmake --preset static
+      - run: cmake --build --preset static
+      - name: Verify the exec SSH backend is what got linked
+        run: ./build/static/casi --version | grep -q 'ssh: exec'
+
   valgrind:
     name: valgrind
     runs-on: ubuntu-latest
