@@ -80,6 +80,11 @@ transport, producing a binary with no non-system dynamic dependencies. Reach for
 it if your distro's libgit2 links libssh2 and you need `~/.ssh/config` host
 aliases to resolve — `casi --version` tells you which backend you have.
 
+That preset produces an artifact to copy, not one to `cmake --install`: libgit2's
+own install rules come along with it and would drop its headers and static
+library into your prefix. Take `build/static/casi` directly, or install from
+`--preset release` against a system libgit2.
+
 ## Roadmap
 
 | Phase | Scope | Status |

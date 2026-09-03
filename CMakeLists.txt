@@ -53,8 +53,13 @@ if(CASI_VENDOR_LIBGIT2)
     FetchContent_MakeAvailable(libgit2)
     # libgit2's packaged target does not export its include directory, so
     # attach it here rather than making every consumer know the source layout.
+    #
+    # BUILD_INTERFACE is required, not decorative: FetchContent puts the source
+    # under the build tree, and CMake rejects a bare INTERFACE include path
+    # there for any target reachable from an install() rule -- that path would
+    # not exist for someone consuming an exported target.
     target_include_directories(libgit2package
-        INTERFACE ${libgit2_SOURCE_DIR}/include)
+        INTERFACE $<BUILD_INTERFACE:${libgit2_SOURCE_DIR}/include>)
     add_library(casi::libgit2 ALIAS libgit2package)
 else()
     find_package(PkgConfig REQUIRED)

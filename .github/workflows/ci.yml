@@ -71,7 +71,19 @@ jobs:
           sudo apt-get install -y cmake pkg-config libgit2-dev valgrind
       - run: cmake --preset debug
       - run: cmake --build --preset debug
-      - run: |
-          ctest --preset debug \
-            --overwrite MemoryCheckCommandOptions="--leak-check=full --error-exitcode=1" \
-            -T memcheck
+      - name: Run the unit tests under valgrind
+        # Driving valgrind directly rather than via `ctest -T memcheck`: that
+        # mode needs the CTest dashboard machinery that include(CTest) sets up,
+        # and this repo only calls enable_testing(). Explicit is also easier to
+        # read when it fails.
+        run: |
+          set -eu
+          status=0
+          for t in build/debug/tests/test_*; do
+            [ -x "$t" ] || continue
+            [ -f "$t" ] || continue
+            echo "== $t"
+            valgrind --leak-check=full --errors-for-leak-kinds=definite \
+                     --error-exitcode=1 "$t" || status=1
+          done
+          exit $status
