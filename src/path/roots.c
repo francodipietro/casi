@@ -22,6 +22,8 @@ struct casi_roots {
     unsigned char first_byte[256];
 };
 
+static int continues_path_component(char c);
+
 int casi_roots_new(casi_roots **out)
 {
     casi_roots *roots = calloc(1, sizeof(*roots));
@@ -87,12 +89,18 @@ static void sort_by_path_len_desc(casi_roots *roots)
 int casi_roots_add(casi_roots *roots, const char *name, const char *local_path)
 {
     struct root_entry entry;
+    const char *name_p;
     size_t i;
 
     if (name[0] == '\0')
         return casi_error_set(CASI_EINVAL, "root name cannot be empty");
     if (local_path[0] == '\0')
         return casi_error_set(CASI_EINVAL, "root \"%s\" has an empty path", name);
+    for (name_p = name; *name_p != '\0'; name_p++)
+        if (!continues_path_component(*name_p))
+            return casi_error_set(CASI_EINVAL,
+                                  "root name \"%s\" contains an invalid character",
+                                  name);
 
     /* Replacing an existing name keeps the table free of ambiguity. */
     for (i = 0; i < roots->len; i++) {
@@ -392,19 +400,15 @@ int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
             continue;
         }
 
-        /* The root name runs to the next '/' or to whatever ends the token.
-         * Config keys constrain names to word characters, so stopping at the
-         * first byte outside that set keeps us inside the JSON string. */
+        /* Use the same component rule as normalize_text(): anything that can
+         * terminate a local path also terminates the canonical root token.
+         * Keeping both directions symmetric avoids treating punctuation such
+         * as ')' as part of an otherwise known root name. */
         name = p + i + scheme_len;
         name_len = 0;
-        while (name + name_len < p + len) {
-            char c = name[name_len];
-
-            if (c == '/' || c == '"' || c == '\\' || c == '\n' ||
-                c == ' ' || c == ',')
-                break;
+        while (name + name_len < p + len &&
+               continues_path_component(name[name_len]))
             name_len++;
-        }
 
         match = NULL;
         for (j = 0; j < roots->len; j++)

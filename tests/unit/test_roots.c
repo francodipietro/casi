@@ -186,6 +186,7 @@ static void test_empty_name_or_path_rejected(void)
     ASSERT_OK(casi_roots_new(&r));
     ASSERT_RC(casi_roots_add(r, "", "/a"), CASI_EINVAL);
     ASSERT_RC(casi_roots_add(r, "a", ""), CASI_EINVAL);
+    ASSERT_RC(casi_roots_add(r, "bad)", "/a"), CASI_EINVAL);
     ASSERT_EQ_INT(casi_roots_count(r), 0);
 
     casi_roots_free(r);
@@ -292,6 +293,20 @@ static void test_text_root_name_stops_at_json_delimiters(void)
     casi_roots_free(r);
 }
 
+static void test_text_root_name_stops_at_path_punctuation(void)
+{
+    casi_roots *mac = mac_roots(), *laptop = laptop_roots();
+
+    check_text_roundtrip(mac, laptop,
+        "paths: (/Users/fdipietro/src), [/Users/fdipietro/src/bookit]!",
+        "paths: (casi://src), [casi://bookit]!",
+        "paths: (/home/fdipietro/src/work), "
+        "[/home/fdipietro/src/work/bookit]!");
+
+    casi_roots_free(mac);
+    casi_roots_free(laptop);
+}
+
 static void test_loading_roots_from_config(void)
 {
     casi_config *cfg = NULL;
@@ -346,6 +361,7 @@ int main(void)
     RUN_TEST(test_text_preserves_binary_bytes);
     RUN_TEST(test_text_denormalize_names_the_missing_root);
     RUN_TEST(test_text_root_name_stops_at_json_delimiters);
+    RUN_TEST(test_text_root_name_stops_at_path_punctuation);
     RUN_TEST(test_loading_roots_from_config);
 
     status = casi_test_report("roots");

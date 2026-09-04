@@ -357,6 +357,7 @@ int casi_fs_hostname(casi_buf *out)
     char host[256];
     char *dot;
 
+    casi_buf_clear(out);
     if (gethostname(host, sizeof(host)) != 0)
         return casi_buf_puts(out, "unnamed");
 
@@ -377,8 +378,12 @@ bool casi_fs_ssh_hostkey_is_known(const char *host, const char *fingerprint)
     FILE *pipe;
     int found = 0;
 
-    /* `host` reaches a shell below, so reject anything outside a hostname's
-     * character set instead of trying to quote it. */
+    /* `host` reaches a shell and is also an ssh-keygen argument. Reject an
+     * empty/option-looking value plus anything outside a hostname's character
+     * set instead of trying to quote it. */
+    if (host[0] == '\0' || host[0] == '-')
+        return false;
+
     for (const char *p = host; *p != '\0'; p++) {
         int ok = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
                  (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_';

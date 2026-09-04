@@ -77,14 +77,24 @@ static void test_realpath_replaces_output(void)
 static void test_hostname_and_known_host_input(void)
 {
     casi_buf hostname = CASI_BUF_INIT;
+    char *first;
 
     ASSERT_OK(casi_fs_hostname(&hostname));
     ASSERT_TRUE(hostname.len > 0);
+    first = casi_strdup(casi_buf_cstr(&hostname));
+    ASSERT_TRUE(first != NULL);
 
-    /* Unsafe host text must be rejected before it can reach ssh-keygen's
-     * shell command. */
+    /* Reusing the buffer replaces the earlier hostname instead of appending
+     * a second copy. */
+    ASSERT_OK(casi_fs_hostname(&hostname));
+    ASSERT_EQ_STR(casi_buf_cstr(&hostname), first);
+
+    /* Unsafe and option-looking host text must be rejected before it can
+     * reach ssh-keygen's shell command. */
     ASSERT_FALSE(casi_fs_ssh_hostkey_is_known("host;echo unsafe", "SHA256:x"));
+    ASSERT_FALSE(casi_fs_ssh_hostkey_is_known("-Ftrusted.example", "SHA256:x"));
 
+    free(first);
     casi_buf_dispose(&hostname);
 }
 
