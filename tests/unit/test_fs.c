@@ -62,6 +62,48 @@ static void test_dirname(void)
     casi_buf_dispose(&b);
 }
 
+static void test_realpath_replaces_output(void)
+{
+    casi_buf got = CASI_BUF_INIT;
+
+    ASSERT_OK(casi_buf_puts(&got, "stale"));
+    ASSERT_OK(casi_fs_realpath(g_tmp, &got));
+    ASSERT_TRUE(strcmp(casi_buf_cstr(&got), "stale") != 0);
+    ASSERT_TRUE(casi_buf_cstr(&got)[0] == '/');
+
+    casi_buf_dispose(&got);
+}
+
+static void test_hostname_and_known_host_input(void)
+{
+    casi_buf hostname = CASI_BUF_INIT;
+    char long_host[600];
+    char *first;
+
+    ASSERT_OK(casi_fs_hostname(&hostname));
+    ASSERT_TRUE(hostname.len > 0);
+    first = casi_strdup(casi_buf_cstr(&hostname));
+    ASSERT_TRUE(first != NULL);
+
+    /* Reusing the buffer replaces the earlier hostname instead of appending
+     * a second copy. */
+    ASSERT_OK(casi_fs_hostname(&hostname));
+    ASSERT_EQ_STR(casi_buf_cstr(&hostname), first);
+
+    /* Unsafe and option-looking host text must be rejected before it can
+     * reach ssh-keygen's shell command. */
+    ASSERT_FALSE(casi_fs_ssh_hostkey_is_known("host;echo unsafe", "SHA256:x"));
+    ASSERT_FALSE(casi_fs_ssh_hostkey_is_known("-Ftrusted.example", "SHA256:x"));
+    ASSERT_FALSE(casi_fs_ssh_hostkey_is_known(NULL, "SHA256:x"));
+    ASSERT_FALSE(casi_fs_ssh_hostkey_is_known("trusted.example", NULL));
+    memset(long_host, 'a', sizeof(long_host) - 1);
+    long_host[sizeof(long_host) - 1] = '\0';
+    ASSERT_FALSE(casi_fs_ssh_hostkey_is_known(long_host, "SHA256:x"));
+
+    free(first);
+    casi_buf_dispose(&hostname);
+}
+
 static void test_mkdir_p_is_idempotent(void)
 {
     casi_buf p = CASI_BUF_INIT;
@@ -136,22 +178,29 @@ static void test_empty_file(void)
 
 static void test_missing_paths_report_notfound(void)
 {
-    casi_buf p = CASI_BUF_INIT, got = CASI_BUF_INIT;
+    casi_buf p = CASI_BUF_INIT, got = CASI_BUF_INIT, loop = CASI_BUF_INIT;
     casi_strvec entries = CASI_STRVEC_INIT;
     casi_stat st;
 
     ASSERT_OK(tmp_path(&p, "does/not/exist"));
 
     ASSERT_RC(casi_fs_stat(casi_buf_cstr(&p), &st), CASI_ENOTFOUND);
+    ASSERT_RC(casi_fs_realpath(casi_buf_cstr(&p), &got), CASI_ENOTFOUND);
     ASSERT_RC(casi_fs_read_file(casi_buf_cstr(&p), &got), CASI_ENOTFOUND);
     ASSERT_RC(casi_fs_listdir(casi_buf_cstr(&p), &entries), CASI_ENOTFOUND);
     ASSERT_FALSE(casi_fs_exists(casi_buf_cstr(&p)));
     ASSERT_FALSE(casi_fs_is_dir(casi_buf_cstr(&p)));
 
+    /* realpath failures other than a missing component are I/O errors. */
+    ASSERT_OK(tmp_path(&loop, "loop"));
+    ASSERT_OK(casi_fs_symlink("loop", casi_buf_cstr(&loop)));
+    ASSERT_RC(casi_fs_realpath(casi_buf_cstr(&loop), &got), CASI_EIO);
+
     /* Removing something already absent is success, not an error. */
     ASSERT_OK(casi_fs_remove_file(casi_buf_cstr(&p)));
 
     casi_strvec_dispose(&entries);
+    casi_buf_dispose(&loop);
     casi_buf_dispose(&p);
     casi_buf_dispose(&got);
 }
@@ -212,6 +261,8 @@ int main(void)
 
     RUN_TEST(test_join);
     RUN_TEST(test_dirname);
+    RUN_TEST(test_realpath_replaces_output);
+    RUN_TEST(test_hostname_and_known_host_input);
     RUN_TEST(test_mkdir_p_is_idempotent);
     RUN_TEST(test_write_read_roundtrip);
     RUN_TEST(test_write_replaces_and_leaves_no_temp);

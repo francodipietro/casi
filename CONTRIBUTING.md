@@ -45,3 +45,17 @@ AGPL-3.0-only. Every source file starts with:
 ```
 
 By contributing you agree your work ships under that license.
+
+## Soft exit codes report themselves
+
+`CASI_ECONFLICT` (exit 3) and `CASI_EUNMAPPED` (exit 5) are documented
+outcomes, not failures `main()` narrates for you. A command returning either
+one must have already told the user everything via `casi_warn()`/`casi_info()`
+before returning -- `main()` deliberately does not print `casi_error_last()`
+for these two codes, to avoid duplicating that report or, if something cleared
+the error state in the meantime, printing a meaningless "unknown error" over a
+perfectly good one. Both failure modes were caught by hand while testing
+`casi pull`'s conflict path, not invented.
+
+Every other non-OK code still goes through the single `main()` print, so
+`casi_error_set()` is still the right (and only) way to report those.

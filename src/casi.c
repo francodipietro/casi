@@ -3,8 +3,23 @@
 
 #include <git2.h>
 
+#include <stdio.h>
+
 int casi_init(void)
 {
+    /*
+     * Line-buffer stdout unconditionally, even when it is not a tty. Without
+     * this, stdout (casi_info) sits in a full buffer until exit while stderr
+     * (casi_warn/casi_err) flushes immediately, so anything piped or
+     * redirected -- a log file, `| less`, a cron job -- shows warnings before
+     * the report they refer to, even though the code emits them after.
+     * Caught by hand testing `casi status` with a pending conflict outside a
+     * terminal, which is exactly how `casi sync` runs from the sync-all.sh
+     * -style setup this tool is meant to replace.
+     */
+    if (setvbuf(stdout, NULL, _IOLBF, BUFSIZ) != 0)
+        return casi_error_set(CASI_EIO, "cannot configure stdout buffering");
+
     if (git_libgit2_init() < 0)
         return casi_error_set_git(CASI_ERROR, "cannot initialise libgit2");
 

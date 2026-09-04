@@ -11,7 +11,7 @@
  *   data dir    $XDG_DATA_HOME/casi            ~/.local/share/casi
  *     repo.git    the internal bare repository
  *     index       the stat-cache
- *     conflicts/  remote copies parked by a diverged pull
+ *     conflicts/  divergent copies parked by pull
  *
  * Two environment overrides exist so the integration tests can run several
  * fully isolated "machines" inside one process tree:

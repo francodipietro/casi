@@ -140,6 +140,32 @@ static void test_unset_removes(void)
     casi_config_free(cfg);
 }
 
+static void test_multivar_replaces_output(void)
+{
+    casi_config *cfg = open_fresh();
+    casi_strvec values = CASI_STRVEC_INIT;
+
+    ASSERT_TRUE(cfg != NULL);
+    ASSERT_OK(casi_config_add_multivar(cfg, "sync.exclude", "casi://src/one"));
+    ASSERT_OK(casi_config_add_multivar(cfg, "sync.exclude", "casi://src/two"));
+    ASSERT_OK(casi_strvec_push(&values, "stale"));
+
+    ASSERT_OK(casi_config_get_multivar(cfg, "sync.exclude", &values));
+    ASSERT_EQ_INT(values.len, 2);
+    ASSERT_EQ_STR(values.items[0], "casi://src/one");
+    ASSERT_EQ_STR(values.items[1], "casi://src/two");
+
+    /* A second read must replace rather than append the same two values. */
+    ASSERT_OK(casi_config_get_multivar(cfg, "sync.exclude", &values));
+    ASSERT_EQ_INT(values.len, 2);
+
+    ASSERT_OK(casi_config_get_multivar(cfg, "sync.missing", &values));
+    ASSERT_EQ_INT(values.len, 0);
+
+    casi_strvec_dispose(&values);
+    casi_config_free(cfg);
+}
+
 struct collect {
     casi_buf out;
 };
@@ -214,6 +240,7 @@ int main(void)
     RUN_TEST(test_bool_falls_back);
     RUN_TEST(test_non_bool_is_rejected);
     RUN_TEST(test_unset_removes);
+    RUN_TEST(test_multivar_replaces_output);
     RUN_TEST(test_foreach_sees_every_key);
     RUN_TEST(test_foreach_propagates_callback_error);
 

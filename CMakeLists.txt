@@ -97,6 +97,16 @@ add_library(casi_core STATIC
     src/util/log.c
     src/util/paths.c
     src/util/config.c
+    src/util/jsonl.c
+    src/path/encoding.c
+    src/path/roots.c
+    src/core/chunk.c
+    src/core/repo.c
+    src/core/store.c
+    src/core/sync.c
+    src/core/ctx.c
+    src/provider/provider.c
+    src/provider/claude_code.c
 )
 
 target_include_directories(casi_core
@@ -117,6 +127,13 @@ add_executable(casi
     src/cmd/cmd_version.c
     src/cmd/cmd_help.c
     src/cmd/cmd_config.c
+    src/cmd/cmd_init.c
+    src/cmd/cmd_status.c
+    src/cmd/cmd_push.c
+    src/cmd/cmd_pull.c
+    src/cmd/cmd_sync.c
+    src/cmd/cmd_exclude.c
+    src/cmd/sync_ops.c
 )
 target_include_directories(casi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(casi PRIVATE casi_core)

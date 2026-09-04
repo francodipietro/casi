@@ -185,6 +185,55 @@ int casi_fs_read_file(const char *path, casi_buf *out)
     return CASI_OK;
 }
 
+int casi_fs_read_file_prefix(const char *path, size_t max, casi_buf *out)
+{
+    FILE *f;
+    size_t got;
+    int rc;
+
+    if ((f = fopen(path, "rb")) == NULL) {
+        if (errno == ENOENT)
+            return casi_error_set(CASI_ENOTFOUND, "no such file: %s", path);
+        return casi_error_set(CASI_EIO, "cannot open %s: %s", path, strerror(errno));
+    }
+
+    casi_buf_clear(out);
+    if ((rc = casi_buf_grow(out, max)) != CASI_OK) {
+        fclose(f);
+        return rc;
+    }
+
+    got = fread(out->ptr, 1, max, f);
+    out->len = got;
+    out->ptr[got] = '\0';
+
+    if (ferror(f)) {
+        fclose(f);
+        return casi_error_set(CASI_EIO, "error reading %s", path);
+    }
+
+    fclose(f);
+    return CASI_OK;
+}
+
+int casi_fs_realpath(const char *path, casi_buf *out)
+{
+    char *resolved;
+    int rc;
+
+    if ((resolved = realpath(path, NULL)) == NULL) {
+        if (errno == ENOENT || errno == ENOTDIR)
+            return casi_error_set(CASI_ENOTFOUND, "no such path: %s", path);
+        return casi_error_set(CASI_EIO, "cannot resolve %s: %s",
+                              path, strerror(errno));
+    }
+
+    casi_buf_clear(out);
+    rc = casi_buf_puts(out, resolved);
+    free(resolved);
+    return rc;
+}
+
 int casi_fs_rename_replace(const char *from, const char *to)
 {
     /* POSIX rename() already replaces an existing destination atomically.
@@ -192,6 +241,14 @@ int casi_fs_rename_replace(const char *from, const char *to)
     if (rename(from, to) != 0)
         return casi_error_set(CASI_EIO, "cannot rename %s to %s: %s",
                               from, to, strerror(errno));
+    return CASI_OK;
+}
+
+int casi_fs_symlink(const char *target, const char *path)
+{
+    if (symlink(target, path) != 0)
+        return casi_error_set(CASI_EIO, "cannot create symlink %s: %s",
+                              path, strerror(errno));
     return CASI_OK;
 }
 
@@ -305,6 +362,63 @@ int casi_fs_join(casi_buf *out, const char *base, const char *rest)
 bool casi_fs_stdout_is_tty(void)
 {
     return isatty(STDOUT_FILENO) ? true : false;
+}
+
+int casi_fs_hostname(casi_buf *out)
+{
+    char host[256];
+    char *dot;
+
+    casi_buf_clear(out);
+    if (gethostname(host, sizeof(host)) != 0)
+        return casi_buf_puts(out, "unnamed");
+
+    host[sizeof(host) - 1] = '\0';
+    if (host[0] == '\0')
+        return casi_buf_puts(out, "unnamed");
+
+    dot = strchr(host, '.');
+    if (dot != NULL)       /* "mac-air.local" -> "mac-air" */
+        *dot = '\0';
+
+    return casi_buf_puts(out, host);
+}
+
+bool casi_fs_ssh_hostkey_is_known(const char *host, const char *fingerprint)
+{
+    char line[512], cmd[512];
+    FILE *pipe;
+    int command_len, found = 0;
+
+    /* `host` reaches a shell and is also an ssh-keygen argument. Reject an
+     * empty/option-looking value plus anything outside a hostname's character
+     * set instead of trying to quote it. */
+    if (host == NULL || fingerprint == NULL || host[0] == '\0' || host[0] == '-')
+        return false;
+
+    for (const char *p = host; *p != '\0'; p++) {
+        int ok = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                 (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_';
+        if (!ok)
+            return false;
+    }
+
+    command_len = snprintf(cmd, sizeof(cmd),
+                           "ssh-keygen -l -F %s 2>/dev/null", host);
+    if (command_len < 0 || (size_t)command_len >= sizeof(cmd))
+        return false;
+    if ((pipe = popen(cmd, "r")) == NULL)
+        return false;
+
+    while (fgets(line, sizeof(line), pipe) != NULL) {
+        if (strstr(line, fingerprint) != NULL) {
+            found = 1;
+            break;
+        }
+    }
+
+    pclose(pipe);
+    return found ? true : false;
 }
 
 const char *casi_fs_home(void)

@@ -6,6 +6,10 @@ set(CASI_UNIT_TESTS
     test_fs
     test_paths
     test_config
+    test_jsonl
+    test_encoding
+    test_roots
+    test_chunk
 )
 
 foreach(test_name IN LISTS CASI_UNIT_TESTS)
@@ -32,3 +36,15 @@ set_tests_properties(cli_unknown_command PROPERTIES WILL_FAIL TRUE)
 # A failing command prints one error line, never the "unknown error" placeholder.
 add_test(NAME cli_errors
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/cli_errors.sh $<TARGET_FILE:casi>)
+
+# End-to-end, against a real file:// remote and no network: two machines with
+# different local layouts, and the conflict path between them.
+set(CASI_INTEGRATION_TESTS
+    two_machines
+    conflict
+)
+foreach(test_name IN LISTS CASI_INTEGRATION_TESTS)
+    add_test(NAME ${test_name}
+        COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/integration/${test_name}.sh
+                $<TARGET_FILE:casi> ${CMAKE_CURRENT_BINARY_DIR}/tmp/${test_name})
+endforeach()

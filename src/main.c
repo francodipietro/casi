@@ -5,6 +5,27 @@
 #include <string.h>
 
 const casi_command casi_commands[] = {
+    { "init",    "create the store and point it at a remote",
+      "casi init [--remote <url>] [--machine <name>]",
+      casi_cmd_init,    false },
+    { "push",    "send this machine's sessions",
+      "casi push [--dry-run]",
+      casi_cmd_push,    false },
+    { "pull",    "bring in the other machines' sessions",
+      "casi pull [--dry-run] [--theirs <session-id>]",
+      casi_cmd_pull,    false },
+    { "sync",    "pull, then push",
+      "casi sync",
+      casi_cmd_sync,    false },
+    { "status",  "what is out of date, and where",
+      "casi status [--porcelain]",
+      casi_cmd_status,  false },
+    { "exclude", "stop syncing a project",
+      "casi exclude <path>",
+      casi_cmd_exclude, false },
+    { "include", "resume syncing a project",
+      "casi include <path>",
+      casi_cmd_include, false },
     { "config",  "get and set casi options",
       "casi config <key> [<value>] | --list | --unset <key>",
       casi_cmd_config,  false },
@@ -102,7 +123,20 @@ int main(int argc, char **argv)
     }
 
     rc = cmd->run(argc - 1, argv + 1);
-    if (rc != CASI_OK)
+
+    /*
+     * CASI_ECONFLICT and CASI_EUNMAPPED are documented exit statuses (3 and
+     * 5), not unhandled failures: the command that returns either one has
+     * already told the user everything via casi_warn()/casi_info() before
+     * returning. Printing casi_error_last() on top would either duplicate
+     * that report or, once something else has called casi_error_clear() in
+     * the meantime, print the meaningless "unknown error" placeholder over a
+     * perfectly good report -- both observed while testing pull's conflict
+     * path. Any future command that returns one of these two codes must
+     * follow the same rule: report it in full before returning, because
+     * nothing here will.
+     */
+    if (rc != CASI_OK && rc != CASI_ECONFLICT && rc != CASI_EUNMAPPED)
         casi_err("%s", casi_error_last());
 
     casi_shutdown();
