@@ -3,7 +3,6 @@
 #include "cmd/sync_ops.h"
 
 #include <string.h>
-#include <time.h>
 
 static void report_unmapped(const casi_buf *root)
 {
@@ -13,12 +12,11 @@ static void report_unmapped(const casi_buf *root)
 }
 
 /* Conflict copies carry their side in the filename. A numeric suffix preserves
- * earlier copies when more than one pull parks the same session in a second. */
+ * earlier copies when the same session is parked more than once. */
 static int conflict_path(const casi_entry *entry, const char *side, casi_buf *path)
 {
     const char *dir = casi_paths_conflicts_dir();
     size_t suffix = 0;
-    time_t now = time(NULL);
     int rc;
 
     if (dir == NULL)
@@ -29,12 +27,11 @@ static int conflict_path(const casi_entry *entry, const char *side, casi_buf *pa
 
         casi_buf_clear(path);
         if (suffix == 0)
-            rc = casi_buf_printf(path, "%s/%s-%s-%lld.jsonl", dir,
-                                 entry->session_id, side, (long long)now);
+            rc = casi_buf_printf(path, "%s/%s-%s.jsonl", dir,
+                                 entry->session_id, side);
         else
-            rc = casi_buf_printf(path, "%s/%s-%s-%lld-%zu.jsonl", dir,
-                                 entry->session_id, side,
-                                 (long long)now, suffix);
+            rc = casi_buf_printf(path, "%s/%s-%s-%zu.jsonl", dir,
+                                 entry->session_id, side, suffix);
         if (rc != CASI_OK)
             return rc;
 

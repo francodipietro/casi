@@ -7,10 +7,12 @@
 static void check(const char *path, const char *want)
 {
     casi_buf got = CASI_BUF_INIT;
+    int rc;
 
-    if (casi_encode_project_dir(path, &got) != CASI_OK) {
+    rc = casi_encode_project_dir(path, &got);
+    if (rc != CASI_OK) {
         casi_buf_dispose(&got);
-        return;
+        ASSERT_OK(rc);
     }
     ASSERT_EQ_STR(casi_buf_cstr(&got), want);
     casi_buf_dispose(&got);

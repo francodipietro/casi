@@ -5,6 +5,7 @@
 #include "casi/jsonl.h"
 
 #include <inttypes.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -438,6 +439,11 @@ static int reassemble(casi_repo *repo, const casi_roots *roots,
     casi_buf joined = CASI_BUF_INIT, piece = CASI_BUF_INIT;
     size_t i;
     int rc = CASI_OK;
+
+    if (entry->bytes > SIZE_MAX)
+        return casi_error_set(CASI_ENOMEM, "session is too large to materialize");
+    if ((rc = casi_buf_grow(&joined, (size_t)entry->bytes)) != CASI_OK)
+        goto done;
 
     for (i = 0; i < entry->chunk_count; i++) {
         if ((rc = casi_repo_read_blob(repo, &entry->chunks[i], &piece)) != CASI_OK)
