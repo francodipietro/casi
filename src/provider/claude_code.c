@@ -27,13 +27,14 @@
 static int projects_dir(casi_buf *out)
 {
     const char *home = casi_paths_claude_home();
+    int rc;
 
     if (home == NULL)
         return casi_error_last_code();
 
     casi_buf_clear(out);
-    if (casi_buf_puts(out, home) != CASI_OK)
-        return CASI_ENOMEM;
+    if ((rc = casi_buf_puts(out, home)) != CASI_OK)
+        return rc;
 
     return casi_fs_join(out, "", "projects");
 }

@@ -79,6 +79,11 @@ static size_t unescape_into(const char *p, size_t len, casi_buf *out)
     return 0;
 }
 
+static bool is_json_space(char c)
+{
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
 /* Finds a key only at the start of a JSON string token. When a token is not
  * the requested key, skip its whole body (including escaped quotes) so key
  * lookalikes inside a message cannot be mistaken for structure. */
@@ -89,7 +94,7 @@ static bool find_value_start(const char *data, size_t len, const char *key,
     size_t i = 0;
 
     while (i < len) {
-        size_t end, value;
+        size_t end, colon, value;
 
         if (data[i] != '"') {
             i++;
@@ -109,11 +114,14 @@ static bool find_value_start(const char *data, size_t len, const char *key,
         if (end >= len)
             return false;
 
+        colon = end + 1;
+        while (colon < len && is_json_space(data[colon]))
+            colon++;
         if (end - i - 1 == key_len &&
             memcmp(data + i + 1, key, key_len) == 0 &&
-            end + 1 < len && data[end + 1] == ':') {
-            value = end + 2;
-            while (value < len && (data[value] == ' ' || data[value] == '\t'))
+            colon < len && data[colon] == ':') {
+            value = colon + 1;
+            while (value < len && is_json_space(data[value]))
                 value++;
             *value_out = value;
             return true;

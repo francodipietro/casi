@@ -37,7 +37,7 @@ static void test_escape_replaces_existing_output(void)
 static void test_escaped_key_text_is_not_structure(void)
 {
     const char strings[] =
-        "{\"message\":\"literal \\\"cwd\\\":\\\"wrong\\\"\",\"cwd\":\"right\"}";
+        "{\"message\":\"literal \\\"cwd\\\":\\\"wrong\\\"\",\"cwd\" \t: \t\"right\"}";
     const char only_text[] =
         "{\"message\":\"literal \\\"cwd\\\":\\\"wrong\\\"\"}";
     const char numbers[] =

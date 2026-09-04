@@ -52,6 +52,8 @@ int  casi_fs_realpath(const char *path, casi_buf *out);
  */
 int  casi_fs_write_file_atomic(const char *path, const void *data, size_t len);
 int  casi_fs_rename_replace(const char *from, const char *to);
+/* Creates a symbolic link at `path` pointing to `target`. */
+int  casi_fs_symlink(const char *target, const char *path);
 int  casi_fs_remove_file(const char *path);
 
 /* Entry names only, without "." and "..", sorted. */

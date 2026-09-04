@@ -193,7 +193,7 @@ static void test_missing_paths_report_notfound(void)
 
     /* realpath failures other than a missing component are I/O errors. */
     ASSERT_OK(tmp_path(&loop, "loop"));
-    ASSERT_EQ_INT(symlink("loop", casi_buf_cstr(&loop)), 0);
+    ASSERT_OK(casi_fs_symlink("loop", casi_buf_cstr(&loop)));
     ASSERT_RC(casi_fs_realpath(casi_buf_cstr(&loop), &got), CASI_EIO);
 
     /* Removing something already absent is success, not an error. */

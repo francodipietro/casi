@@ -244,6 +244,14 @@ int casi_fs_rename_replace(const char *from, const char *to)
     return CASI_OK;
 }
 
+int casi_fs_symlink(const char *target, const char *path)
+{
+    if (symlink(target, path) != 0)
+        return casi_error_set(CASI_EIO, "cannot create symlink %s: %s",
+                              path, strerror(errno));
+    return CASI_OK;
+}
+
 int casi_fs_write_file_atomic(const char *path, const void *data, size_t len)
 {
     casi_buf tmp = CASI_BUF_INIT;
