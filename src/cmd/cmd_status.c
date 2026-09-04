@@ -75,7 +75,7 @@ int casi_cmd_status(int argc, char **argv)
     }
 
     casi_info("machine: %s   remote: %s", ctx.machine, casi_buf_cstr(&url));
-    casi_info("");
+    casi_info("%s", "");
 
     human_size(summary.push_bytes, &size);
     casi_info("  to push      %4zu sessions   %s", summary.to_push, casi_buf_cstr(&size));
@@ -87,11 +87,11 @@ int casi_cmd_status(int argc, char **argv)
 
     /* "to pull" counts what the last fetch saw, not what is on the remote
      * right now: status stays offline and instant, like git's. */
-    casi_info("");
+    casi_info("%s", "");
     casi_info("  (remote figures are from the last fetch; run `casi pull` to refresh)");
 
     if (summary.conflicts > 0) {
-        casi_info("");
+        casi_info("%s", "");
         casi_warn("%zu session(s) diverged between machines", summary.conflicts);
         casi_info("  run `casi pull` to park the remote copies for inspection");
         rc = CASI_ECONFLICT;
