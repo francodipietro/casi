@@ -41,7 +41,8 @@ int  casi_config_unset(casi_config *cfg, const char *key);
 /*
  * A key that legitimately holds several values, git's own multivar. The
  * exclude list uses it: one `sync.exclude = <path>` line per excluded
- * project, exactly as .gitconfig would spell it.
+ * project, exactly as .gitconfig would spell it. Replaces `out`; an absent
+ * key leaves it empty.
  */
 int  casi_config_get_multivar(casi_config *cfg, const char *key, casi_strvec *out);
 int  casi_config_add_multivar(casi_config *cfg, const char *key, const char *value);

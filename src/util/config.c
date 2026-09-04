@@ -126,6 +126,7 @@ int casi_config_get_multivar(casi_config *cfg, const char *key, casi_strvec *out
     struct multivar_ctx ctx = { out, CASI_OK };
     int err;
 
+    casi_strvec_dispose(out);
     err = git_config_get_multivar_foreach(cfg->cfg, key, NULL, multivar_collect, &ctx);
 
     /* No entries is the ordinary state, not a failure: nothing is excluded. */
