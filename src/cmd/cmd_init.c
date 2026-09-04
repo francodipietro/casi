@@ -3,24 +3,12 @@
 #include "casi/ctx.h"
 
 #include <string.h>
-#include <unistd.h>
 
 /* A default machine label, so `casi init` needs no arguments to be useful.
  * The hostname is what the user already calls this machine. */
 static int default_machine(casi_buf *out)
 {
-    char host[256];
-
-    if (gethostname(host, sizeof(host)) == 0 && host[0] != '\0') {
-        char *dot = strchr(host, '.');
-
-        host[sizeof(host) - 1] = '\0';
-        if (dot != NULL)       /* "mac-air.local" -> "mac-air" */
-            *dot = '\0';
-        return casi_buf_puts(out, host);
-    }
-
-    return casi_buf_puts(out, "unnamed");
+    return casi_fs_hostname(out);
 }
 
 int casi_cmd_init(int argc, char **argv)
@@ -77,8 +65,7 @@ int casi_cmd_init(int argc, char **argv)
     if (remote != NULL)
         casi_info("  remote: %s", remote);
     else
-        casi_info("  no remote yet -- add one with "
-                  "`casi config remote.origin.url <url>` or re-run with --remote");
+        casi_info("  no remote yet -- re-run with `casi init --remote <url>`");
 
     rc = CASI_OK;
 

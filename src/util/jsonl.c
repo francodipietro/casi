@@ -29,14 +29,14 @@ static size_t unescape_into(const char *p, size_t len, casi_buf *out)
             return 0;
 
         switch (p[i + 1]) {
-        case '"':  casi_buf_putc(out, '"');  break;
-        case '\\': casi_buf_putc(out, '\\'); break;
-        case '/':  casi_buf_putc(out, '/');  break;
-        case 'n':  casi_buf_putc(out, '\n'); break;
-        case 't':  casi_buf_putc(out, '\t'); break;
-        case 'r':  casi_buf_putc(out, '\r'); break;
-        case 'b':  casi_buf_putc(out, '\b'); break;
-        case 'f':  casi_buf_putc(out, '\f'); break;
+        case '"':  c = '"';  break;
+        case '\\': c = '\\'; break;
+        case '/':  c = '/';  break;
+        case 'n':  c = '\n'; break;
+        case 't':  c = '\t'; break;
+        case 'r':  c = '\r'; break;
+        case 'b':  c = '\b'; break;
+        case 'f':  c = '\f'; break;
         case 'u':
             /* A \u escape cannot appear inside a POSIX path that casi cares
              * about; keep it verbatim rather than half-decoding it. */
@@ -48,6 +48,8 @@ static size_t unescape_into(const char *p, size_t len, casi_buf *out)
         default:
             return 0;
         }
+        if (casi_buf_putc(out, c) != CASI_OK)
+            return 0;
         i += 2;
     }
 

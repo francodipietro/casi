@@ -438,38 +438,13 @@ static void base64_no_pad(const unsigned char *in, size_t len, char *out, size_t
  */
 static int hostkey_is_known(const git_cert_hostkey *key, const char *host)
 {
-    char want[64], line[512], cmd[512];
-    FILE *pipe;
-    int found = 0;
+    char want[64];
 
     if ((key->type & GIT_CERT_SSH_SHA256) == 0)
         return 0;
 
     base64_no_pad(key->hash_sha256, sizeof(key->hash_sha256), want, sizeof(want));
-
-    /* The host comes from the remote URL the user configured, and reaches a
-     * shell here, so anything outside a hostname's character set is refused
-     * rather than quoted. */
-    for (const char *p = host; *p != '\0'; p++) {
-        int ok = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
-                 (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_';
-        if (!ok)
-            return 0;
-    }
-
-    snprintf(cmd, sizeof(cmd), "ssh-keygen -l -F %s 2>/dev/null", host);
-    if ((pipe = popen(cmd, "r")) == NULL)
-        return 0;
-
-    while (fgets(line, sizeof(line), pipe) != NULL) {
-        if (strstr(line, want) != NULL) {
-            found = 1;
-            break;
-        }
-    }
-
-    pclose(pipe);
-    return found;
+    return casi_fs_ssh_hostkey_is_known(host, want) ? 1 : 0;
 }
 
 static int certificate_cb(git_cert *cert, int valid, const char *host, void *payload)

@@ -10,8 +10,9 @@
 #include "casi/str.h"
 
 /*
- * Every filesystem syscall casi makes goes through this file. That is
- * deliberate: it is the single place the eventual Windows port has to touch.
+ * Every direct operating-system interaction casi makes goes through this
+ * file. That is deliberate: it is the single place the eventual Windows port
+ * has to touch.
  *
  * Two rules hold everywhere above this layer:
  *   - paths are UTF-8 and use '/' as the separator, on every platform;
@@ -42,6 +43,8 @@ int  casi_fs_read_file(const char *path, casi_buf *out);
  * fields casi reads to identify one live in the first record, so scanning a
  * session should never mean reading all of it. */
 int  casi_fs_read_file_prefix(const char *path, size_t max, casi_buf *out);
+/* Resolves `path` to an absolute, symlink-free path in `out`. */
+int  casi_fs_realpath(const char *path, casi_buf *out);
 
 /*
  * Writes via a sibling temp file plus an atomic replace, so an interrupted
@@ -62,6 +65,12 @@ int  casi_fs_dirname(casi_buf *out, const char *path);
 /* Whether stdout is a terminal. Lives here rather than in the logger because
  * isatty() is a syscall, and on Windows becomes _isatty()/GetConsoleMode(). */
 bool casi_fs_stdout_is_tty(void);
+
+/* A short, user-facing hostname; falls back to "unnamed" when unavailable. */
+int casi_fs_hostname(casi_buf *out);
+
+/* Whether OpenSSH's known_hosts contains `fingerprint` for `host`. */
+bool casi_fs_ssh_hostkey_is_known(const char *host, const char *fingerprint);
 
 /* The user's home directory. NULL only if the environment has none. */
 const char *casi_fs_home(void);

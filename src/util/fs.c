@@ -216,6 +216,20 @@ int casi_fs_read_file_prefix(const char *path, size_t max, casi_buf *out)
     return CASI_OK;
 }
 
+int casi_fs_realpath(const char *path, casi_buf *out)
+{
+    char *resolved;
+    int rc;
+
+    if ((resolved = realpath(path, NULL)) == NULL)
+        return casi_error_set(CASI_ENOTFOUND, "no such directory: %s", path);
+
+    casi_buf_clear(out);
+    rc = casi_buf_puts(out, resolved);
+    free(resolved);
+    return rc;
+}
+
 int casi_fs_rename_replace(const char *from, const char *to)
 {
     /* POSIX rename() already replaces an existing destination atomically.
@@ -336,6 +350,55 @@ int casi_fs_join(casi_buf *out, const char *base, const char *rest)
 bool casi_fs_stdout_is_tty(void)
 {
     return isatty(STDOUT_FILENO) ? true : false;
+}
+
+int casi_fs_hostname(casi_buf *out)
+{
+    char host[256];
+    char *dot;
+
+    if (gethostname(host, sizeof(host)) != 0)
+        return casi_buf_puts(out, "unnamed");
+
+    host[sizeof(host) - 1] = '\0';
+    if (host[0] == '\0')
+        return casi_buf_puts(out, "unnamed");
+
+    dot = strchr(host, '.');
+    if (dot != NULL)       /* "mac-air.local" -> "mac-air" */
+        *dot = '\0';
+
+    return casi_buf_puts(out, host);
+}
+
+bool casi_fs_ssh_hostkey_is_known(const char *host, const char *fingerprint)
+{
+    char line[512], cmd[512];
+    FILE *pipe;
+    int found = 0;
+
+    /* `host` reaches a shell below, so reject anything outside a hostname's
+     * character set instead of trying to quote it. */
+    for (const char *p = host; *p != '\0'; p++) {
+        int ok = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                 (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_';
+        if (!ok)
+            return false;
+    }
+
+    snprintf(cmd, sizeof(cmd), "ssh-keygen -l -F %s 2>/dev/null", host);
+    if ((pipe = popen(cmd, "r")) == NULL)
+        return false;
+
+    while (fgets(line, sizeof(line), pipe) != NULL) {
+        if (strstr(line, fingerprint) != NULL) {
+            found = 1;
+            break;
+        }
+    }
+
+    pclose(pipe);
+    return found ? true : false;
 }
 
 const char *casi_fs_home(void)

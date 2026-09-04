@@ -2,7 +2,6 @@
 #include "cmd/cmd.h"
 #include "casi/ctx.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -14,16 +13,9 @@
 static int canonical_of(casi_ctx *ctx, const char *arg, casi_buf *out)
 {
     casi_buf absolute = CASI_BUF_INIT;
-    char *resolved;
     int rc;
 
-    resolved = realpath(arg, NULL);
-    if (resolved == NULL)
-        return casi_error_set(CASI_ENOTFOUND, "no such directory: %s", arg);
-
-    rc = casi_buf_puts(&absolute, resolved);
-    free(resolved);
-    if (rc != CASI_OK)
+    if ((rc = casi_fs_realpath(arg, &absolute)) != CASI_OK)
         goto done;
 
     rc = casi_roots_normalize_path(ctx->roots, casi_buf_cstr(&absolute), out);

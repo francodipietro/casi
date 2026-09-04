@@ -62,6 +62,32 @@ static void test_dirname(void)
     casi_buf_dispose(&b);
 }
 
+static void test_realpath_replaces_output(void)
+{
+    casi_buf got = CASI_BUF_INIT;
+
+    ASSERT_OK(casi_buf_puts(&got, "stale"));
+    ASSERT_OK(casi_fs_realpath(g_tmp, &got));
+    ASSERT_TRUE(strcmp(casi_buf_cstr(&got), "stale") != 0);
+    ASSERT_TRUE(casi_buf_cstr(&got)[0] == '/');
+
+    casi_buf_dispose(&got);
+}
+
+static void test_hostname_and_known_host_input(void)
+{
+    casi_buf hostname = CASI_BUF_INIT;
+
+    ASSERT_OK(casi_fs_hostname(&hostname));
+    ASSERT_TRUE(hostname.len > 0);
+
+    /* Unsafe host text must be rejected before it can reach ssh-keygen's
+     * shell command. */
+    ASSERT_FALSE(casi_fs_ssh_hostkey_is_known("host;echo unsafe", "SHA256:x"));
+
+    casi_buf_dispose(&hostname);
+}
+
 static void test_mkdir_p_is_idempotent(void)
 {
     casi_buf p = CASI_BUF_INIT;
@@ -212,6 +238,8 @@ int main(void)
 
     RUN_TEST(test_join);
     RUN_TEST(test_dirname);
+    RUN_TEST(test_realpath_replaces_output);
+    RUN_TEST(test_hostname_and_known_host_input);
     RUN_TEST(test_mkdir_p_is_idempotent);
     RUN_TEST(test_write_read_roundtrip);
     RUN_TEST(test_write_replaces_and_leaves_no_temp);
