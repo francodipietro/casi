@@ -35,6 +35,7 @@ int casi_cmd_status(int argc, char **argv)
     casi_sync_summary summary;
     casi_buf url = CASI_BUF_INIT, size = CASI_BUF_INIT;
     bool porcelain = false;
+    size_t excluded;
     int i, rc;
 
     memset(&local, 0, sizeof(local));
@@ -51,17 +52,13 @@ int casi_cmd_status(int argc, char **argv)
     if ((rc = casi_ctx_open(&ctx)) != CASI_OK)
         return rc;
 
-    if ((rc = casi_ops_scan_local(&ctx, &local, &summary.excluded)) != CASI_OK)
+    if ((rc = casi_ops_scan_local(&ctx, &local, &excluded)) != CASI_OK)
         goto done;
     if ((rc = casi_ops_load_remote(&ctx, &remote)) != CASI_OK)
         goto done;
 
-    {
-        size_t excluded = summary.excluded;
-
-        casi_ops_summarise(&local, &remote, &summary);
-        summary.excluded = excluded;
-    }
+    casi_ops_summarise(&local, &remote, &summary);
+    summary.excluded = excluded;
 
     if (porcelain) {
         rc = status_porcelain(&summary);

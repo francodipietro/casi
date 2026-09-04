@@ -17,7 +17,8 @@ int casi_init(void)
      * terminal, which is exactly how `casi sync` runs from the sync-all.sh
      * -style setup this tool is meant to replace.
      */
-    setvbuf(stdout, NULL, _IOLBF, 0);
+    if (setvbuf(stdout, NULL, _IOLBF, BUFSIZ) != 0)
+        return casi_error_set(CASI_EIO, "cannot configure stdout buffering");
 
     if (git_libgit2_init() < 0)
         return casi_error_set_git(CASI_ERROR, "cannot initialise libgit2");
