@@ -79,38 +79,62 @@ static size_t unescape_into(const char *p, size_t len, casi_buf *out)
     return 0;
 }
 
-bool casi_json_find_string(const char *data, size_t len, const char *key, casi_buf *out)
+/* Finds a key only at the start of a JSON string token. When a token is not
+ * the requested key, skip its whole body (including escaped quotes) so key
+ * lookalikes inside a message cannot be mistaken for structure. */
+static bool find_value_start(const char *data, size_t len, const char *key,
+                             size_t *value_out)
 {
     size_t key_len = strlen(key);
     size_t i = 0;
 
-    /* Looking for the literal "<key>": followed by a quoted value. Scanning
-     * rather than parsing means a key of the same name nested deeper could in
-     * principle match first; for the fields casi reads (cwd, sessionId) the
-     * top-level occurrence comes first in practice. */
-    while (i + key_len + 4 < len) {
-        const char *q = memchr(data + i, '"', len - i);
-        size_t at;
+    while (i < len) {
+        size_t end, value;
 
-        if (q == NULL)
-            return false;
-
-        at = (size_t)(q - data);
-        if (at + key_len + 3 < len &&
-            memcmp(data + at + 1, key, key_len) == 0 &&
-            data[at + 1 + key_len] == '"' &&
-            data[at + 2 + key_len] == ':') {
-            size_t v = at + 3 + key_len;
-
-            /* Tolerate a space after the colon; reject a non-string value. */
-            while (v < len && (data[v] == ' ' || data[v] == '\t'))
-                v++;
-            if (v < len && data[v] == '"')
-                return unescape_into(data + v + 1, len - v - 1, out) > 0;
+        if (data[i] != '"') {
+            i++;
+            continue;
         }
 
-        i = at + 1;
+        end = i + 1;
+        while (end < len && data[end] != '"') {
+            if (data[end] == '\\') {
+                if (end + 1 >= len)
+                    return false;
+                end += 2;
+            } else {
+                end++;
+            }
+        }
+        if (end >= len)
+            return false;
+
+        if (end - i - 1 == key_len &&
+            memcmp(data + i + 1, key, key_len) == 0 &&
+            end + 1 < len && data[end + 1] == ':') {
+            value = end + 2;
+            while (value < len && (data[value] == ' ' || data[value] == '\t'))
+                value++;
+            *value_out = value;
+            return true;
+        }
+
+        i = end + 1;
     }
+
+    return false;
+}
+
+bool casi_json_find_string(const char *data, size_t len, const char *key, casi_buf *out)
+{
+    size_t value;
+
+    /* Scanning rather than parsing means a key of the same name nested deeper
+     * could in principle match first; for the fields casi reads (cwd,
+     * sessionId) the top-level occurrence comes first in practice. */
+    if (find_value_start(data, len, key, &value) &&
+        value < len && data[value] == '"')
+        return unescape_into(data + value + 1, len - value - 1, out) > 0;
 
     return false;
 }
@@ -175,37 +199,17 @@ int casi_json_escape_string(const char *value, casi_buf *out)
 
 uint64_t casi_json_find_uint(const char *data, size_t len, const char *key)
 {
-    size_t key_len = strlen(key);
-    size_t i = 0;
+    size_t i;
+    uint64_t value = 0;
 
-    while (i + key_len + 3 < len) {
-        const char *q = memchr(data + i, '"', len - i);
-        size_t at;
+    if (!find_value_start(data, len, key, &i) ||
+        i >= len || data[i] < '0' || data[i] > '9')
+        return 0;
 
-        if (q == NULL)
-            return 0;
+    while (i < len && data[i] >= '0' && data[i] <= '9')
+        value = value * 10 + (uint64_t)(data[i++] - '0');
 
-        at = (size_t)(q - data);
-        if (at + key_len + 2 < len &&
-            memcmp(data + at + 1, key, key_len) == 0 &&
-            data[at + 1 + key_len] == '"' &&
-            data[at + 2 + key_len] == ':') {
-            size_t v = at + 3 + key_len;
-            uint64_t value = 0;
-
-            while (v < len && (data[v] == ' ' || data[v] == '\t'))
-                v++;
-            if (v >= len || data[v] < '0' || data[v] > '9')
-                return 0;
-            while (v < len && data[v] >= '0' && data[v] <= '9')
-                value = value * 10 + (uint64_t)(data[v++] - '0');
-            return value;
-        }
-
-        i = at + 1;
-    }
-
-    return 0;
+    return value;
 }
 
 bool casi_json_looks_balanced(const char *data, size_t len)

@@ -47,7 +47,8 @@ Only the final chunk can be partial, so the comparison is exact.
 On divergence casi keeps the local file untouched and parks the remote copy
 under `<data dir>/conflicts/`, reporting exit status 3. Nothing is ever
 destroyed, and nothing prompts, so `casi sync` stays safe to run unattended at
-login.
+login. When the user explicitly chooses `casi pull --theirs`, casi parks the
+divergent local copy before replacing it with the remote one.
 
 The design does not *assume* strict append-only. A rewritten prefix (a rewind,
 a compaction) simply fails the prefix test and surfaces as a conflict.

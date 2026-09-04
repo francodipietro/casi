@@ -223,7 +223,7 @@ int casi_fs_realpath(const char *path, casi_buf *out)
 
     if ((resolved = realpath(path, NULL)) == NULL) {
         if (errno == ENOENT || errno == ENOTDIR)
-            return casi_error_set(CASI_ENOTFOUND, "no such directory: %s", path);
+            return casi_error_set(CASI_ENOTFOUND, "no such path: %s", path);
         return casi_error_set(CASI_EIO, "cannot resolve %s: %s",
                               path, strerror(errno));
     }

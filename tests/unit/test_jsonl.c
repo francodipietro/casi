@@ -34,6 +34,25 @@ static void test_escape_replaces_existing_output(void)
     casi_buf_dispose(&escaped);
 }
 
+static void test_escaped_key_text_is_not_structure(void)
+{
+    const char strings[] =
+        "{\"message\":\"literal \\\"cwd\\\":\\\"wrong\\\"\",\"cwd\":\"right\"}";
+    const char only_text[] =
+        "{\"message\":\"literal \\\"cwd\\\":\\\"wrong\\\"\"}";
+    const char numbers[] =
+        "{\"message\":\"literal \\\"bytes\\\":999\",\"bytes\":42}";
+    casi_buf value = CASI_BUF_INIT;
+
+    ASSERT_TRUE(casi_json_find_string(strings, sizeof(strings) - 1, "cwd", &value));
+    ASSERT_EQ_STR(casi_buf_cstr(&value), "right");
+    ASSERT_FALSE(casi_json_find_string(only_text, sizeof(only_text) - 1,
+                                       "cwd", &value));
+    ASSERT_EQ_INT(casi_json_find_uint(numbers, sizeof(numbers) - 1, "bytes"), 42);
+
+    casi_buf_dispose(&value);
+}
+
 int main(void)
 {
     int status;
@@ -45,6 +64,7 @@ int main(void)
 
     RUN_TEST(test_escape_and_read_roundtrip);
     RUN_TEST(test_escape_replaces_existing_output);
+    RUN_TEST(test_escaped_key_text_is_not_structure);
 
     status = casi_test_report("jsonl");
     casi_shutdown();

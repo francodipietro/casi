@@ -12,32 +12,59 @@ static void report_unmapped(const casi_buf *root)
              casi_buf_cstr(root));
 }
 
-/*
- * Parks the remote side of a divergence instead of overwriting the local
- * transcript. Nothing is destroyed and nothing prompts, which is what keeps
- * `casi sync` safe to run unattended at login.
- */
-static int park_conflict(casi_ctx *ctx, const casi_entry *remote)
+/* Conflict copies carry their side in the filename. A numeric suffix preserves
+ * earlier copies when more than one pull parks the same session in a second. */
+static int conflict_path(const casi_entry *entry, const char *side, casi_buf *path)
 {
-    casi_buf path = CASI_BUF_INIT, unmapped = CASI_BUF_INIT;
     const char *dir = casi_paths_conflicts_dir();
+    size_t suffix = 0;
+    time_t now = time(NULL);
     int rc;
 
     if (dir == NULL)
         return casi_error_last_code();
 
-    if ((rc = casi_buf_printf(&path, "%s/%s-%lld.jsonl", dir,
-                              remote->session_id, (long long)time(NULL))) != CASI_OK)
+    for (;;) {
+        casi_stat st;
+
+        casi_buf_clear(path);
+        if (suffix == 0)
+            rc = casi_buf_printf(path, "%s/%s-%s-%lld.jsonl", dir,
+                                 entry->session_id, side, (long long)now);
+        else
+            rc = casi_buf_printf(path, "%s/%s-%s-%lld-%zu.jsonl", dir,
+                                 entry->session_id, side,
+                                 (long long)now, suffix);
+        if (rc != CASI_OK)
+            return rc;
+
+        rc = casi_fs_stat(casi_buf_cstr(path), &st);
+        if (rc == CASI_ENOTFOUND) {
+            casi_error_clear();
+            return CASI_OK;
+        }
+        if (rc != CASI_OK)
+            return rc;
+        suffix++;
+    }
+}
+
+static int park_conflict(casi_ctx *ctx, const casi_entry *entry, const char *side)
+{
+    casi_buf path = CASI_BUF_INIT, unmapped = CASI_BUF_INIT;
+    int rc;
+
+    if ((rc = conflict_path(entry, side, &path)) != CASI_OK)
         goto done;
 
-    rc = casi_store_materialize_to(ctx->repo, ctx->roots, remote,
+    rc = casi_store_materialize_to(ctx->repo, ctx->roots, entry,
                                    casi_buf_cstr(&path), &unmapped);
     if (rc == CASI_EUNMAPPED)
         report_unmapped(&unmapped);
     if (rc == CASI_OK)
-        casi_warn("diverged: %s", remote->session_id);
+        casi_warn("diverged: %s", entry->session_id);
     if (rc == CASI_OK)
-        casi_info("    remote copy parked at %s", casi_buf_cstr(&path));
+        casi_info("    %s copy parked at %s", side, casi_buf_cstr(&path));
 
 done:
     casi_buf_dispose(&path);
@@ -96,10 +123,12 @@ int casi_cmd_pull(int argc, char **argv)
 
             if (!override) {
                 conflicts++;
-                if (!dry_run && (rc = park_conflict(&ctx, r)) != CASI_OK)
+                if (!dry_run && (rc = park_conflict(&ctx, r, "remote")) != CASI_OK)
                     goto done;
                 continue;
             }
+            if (!dry_run && (rc = park_conflict(&ctx, l, "local")) != CASI_OK)
+                goto done;
             casi_info("taking the remote copy of %s", r->session_id);
         }
 

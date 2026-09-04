@@ -74,13 +74,18 @@ echo "  ok   pull: exit 3, no spurious error line"
 [ "$(cat "$sess_b")" = "$before_b" ] || fail "pull: local file was modified during a conflict"
 echo "  ok   pull: local copy untouched"
 
-parked=$(find "$work/b/casi/conflicts" -name '*.jsonl' 2>/dev/null | head -1)
+parked=$(find "$work/b/casi/conflicts" -name '*-remote-*.jsonl' 2>/dev/null | head -1)
 [ -n "$parked" ] || fail "pull: no conflicting copy was parked"
 grep -q 'edited on A' "$parked" || fail "parked copy does not contain the remote content"
 echo "  ok   pull: remote copy parked at $parked"
 
 "$casi" pull --theirs aaaaaaaa-0000-0000-0000-000000000000 >/dev/null || fail "pull --theirs"
+local_parked=$(find "$work/b/casi/conflicts" -name '*-local-*.jsonl' 2>/dev/null | head -1)
+[ -n "$local_parked" ] || fail "pull --theirs: local divergent copy was not parked"
+grep -q 'edited on B, differently' "$local_parked" ||
+    fail "pull --theirs: parked local copy does not contain the local edits"
+echo "  ok   pull --theirs: local copy parked at $local_parked"
 grep -q 'edited on A' "$sess_b" || fail "--theirs did not take the remote copy"
 echo "  ok   pull --theirs: remote copy adopted"
 
-echo "conflict: 6 passed"
+echo "conflict: 7 passed"
