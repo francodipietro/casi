@@ -21,6 +21,13 @@ extern const casi_command casi_commands[];
 
 const casi_command *casi_command_lookup(const char *name);
 
+int casi_cmd_init(int argc, char **argv);
+int casi_cmd_status(int argc, char **argv);
+int casi_cmd_push(int argc, char **argv);
+int casi_cmd_pull(int argc, char **argv);
+int casi_cmd_sync(int argc, char **argv);
+int casi_cmd_exclude(int argc, char **argv);
+int casi_cmd_include(int argc, char **argv);
 int casi_cmd_version(int argc, char **argv);
 int casi_cmd_help(int argc, char **argv);
 int casi_cmd_config(int argc, char **argv);

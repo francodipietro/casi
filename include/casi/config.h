@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #include "casi/buf.h"
+#include "casi/str.h"
 
 /*
  * casi's own config file is git's INI format, parsed by libgit2's own config
@@ -36,6 +37,16 @@ int  casi_config_get_bool(casi_config *cfg, const char *key, bool fallback, bool
 
 int  casi_config_set_string(casi_config *cfg, const char *key, const char *value);
 int  casi_config_unset(casi_config *cfg, const char *key);
+
+/*
+ * A key that legitimately holds several values, git's own multivar. The
+ * exclude list uses it: one `sync.exclude = <path>` line per excluded
+ * project, exactly as .gitconfig would spell it.
+ */
+int  casi_config_get_multivar(casi_config *cfg, const char *key, casi_strvec *out);
+int  casi_config_add_multivar(casi_config *cfg, const char *key, const char *value);
+/* Removes every entry equal to `value`. CASI_ENOTFOUND when there was none. */
+int  casi_config_remove_multivar(casi_config *cfg, const char *key, const char *value);
 
 /* Iterates every key in file order. A non-zero return from `cb` stops the
  * walk and is passed back to the caller. */

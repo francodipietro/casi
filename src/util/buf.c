@@ -18,22 +18,32 @@ int casi_buf_grow(casi_buf *buf, size_t extra)
         return casi_error_set(CASI_ENOMEM, "buffer size overflow");
 
     need = buf->len + extra + 1;
-    if (need <= buf->cap)
-        return CASI_OK;
+    if (need > buf->cap) {
+        cap = buf->cap ? buf->cap : 64;
+        while (cap < need) {
+            if (cap > SIZE_MAX / 2)
+                return casi_error_set(CASI_ENOMEM, "buffer size overflow");
+            cap *= 2;
+        }
 
-    cap = buf->cap ? buf->cap : 64;
-    while (cap < need) {
-        if (cap > SIZE_MAX / 2)
-            return casi_error_set(CASI_ENOMEM, "buffer size overflow");
-        cap *= 2;
+        p = realloc(buf->ptr, cap);
+        if (p == NULL)
+            return casi_error_set(CASI_ENOMEM, "out of memory growing buffer to %zu bytes", cap);
+
+        buf->ptr = p;
+        buf->cap = cap;
     }
 
-    p = realloc(buf->ptr, cap);
-    if (p == NULL)
-        return casi_error_set(CASI_ENOMEM, "out of memory growing buffer to %zu bytes", cap);
-
-    buf->ptr = p;
-    buf->cap = cap;
+    /*
+     * The header promises a NUL one past `len` at all times. Every write path
+     * (put/putc/printf) maintains that by construction, but grow() alone does
+     * not: realloc() leaves fresh memory uninitialised, so a caller that grows
+     * for a result that turns out to be empty -- casi_encode_project_dir("")
+     * is exactly this -- left casi_buf_cstr() reading uninitialised heap
+     * looking for a terminator nothing had placed. Caught by ASan, not by
+     * inspection.
+     */
+    buf->ptr[buf->len] = '\0';
     return CASI_OK;
 }
 

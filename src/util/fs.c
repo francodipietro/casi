@@ -185,6 +185,37 @@ int casi_fs_read_file(const char *path, casi_buf *out)
     return CASI_OK;
 }
 
+int casi_fs_read_file_prefix(const char *path, size_t max, casi_buf *out)
+{
+    FILE *f;
+    size_t got;
+    int rc;
+
+    if ((f = fopen(path, "rb")) == NULL) {
+        if (errno == ENOENT)
+            return casi_error_set(CASI_ENOTFOUND, "no such file: %s", path);
+        return casi_error_set(CASI_EIO, "cannot open %s: %s", path, strerror(errno));
+    }
+
+    casi_buf_clear(out);
+    if ((rc = casi_buf_grow(out, max)) != CASI_OK) {
+        fclose(f);
+        return rc;
+    }
+
+    got = fread(out->ptr, 1, max, f);
+    out->len = got;
+    out->ptr[got] = '\0';
+
+    if (ferror(f)) {
+        fclose(f);
+        return casi_error_set(CASI_EIO, "error reading %s", path);
+    }
+
+    fclose(f);
+    return CASI_OK;
+}
+
 int casi_fs_rename_replace(const char *from, const char *to)
 {
     /* POSIX rename() already replaces an existing destination atomically.

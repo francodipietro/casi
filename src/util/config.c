@@ -108,6 +108,77 @@ int casi_config_unset(casi_config *cfg, const char *key)
     return CASI_OK;
 }
 
+struct multivar_ctx {
+    casi_strvec *out;
+    int rc;
+};
+
+static int multivar_collect(const git_config_entry *entry, void *payload)
+{
+    struct multivar_ctx *ctx = payload;
+
+    ctx->rc = casi_strvec_push(ctx->out, entry->value != NULL ? entry->value : "");
+    return ctx->rc != CASI_OK ? -1 : 0;
+}
+
+int casi_config_get_multivar(casi_config *cfg, const char *key, casi_strvec *out)
+{
+    struct multivar_ctx ctx = { out, CASI_OK };
+    int err;
+
+    err = git_config_get_multivar_foreach(cfg->cfg, key, NULL, multivar_collect, &ctx);
+
+    /* No entries is the ordinary state, not a failure: nothing is excluded. */
+    if (err == GIT_ENOTFOUND)
+        return CASI_OK;
+    if (ctx.rc != CASI_OK)
+        return ctx.rc;
+    if (err != 0)
+        return casi_error_set_git(CASI_ERROR, "cannot read config key %s", key);
+
+    return CASI_OK;
+}
+
+int casi_config_add_multivar(casi_config *cfg, const char *key, const char *value)
+{
+    if (git_config_set_multivar(cfg->cfg, key, "^$", value) != 0)
+        return casi_error_set_git(CASI_ERROR, "cannot add %s = %s", key, value);
+    return CASI_OK;
+}
+
+int casi_config_remove_multivar(casi_config *cfg, const char *key, const char *value)
+{
+    casi_buf pattern = CASI_BUF_INIT;
+    const char *p;
+    int err, rc;
+
+    /* git matches multivar values by regex, so anchor and escape the literal
+     * path -- a project path is full of dots and dashes. */
+    if ((rc = casi_buf_putc(&pattern, '^')) != CASI_OK)
+        goto done;
+    for (p = value; *p != '\0'; p++) {
+        if (strchr(".^$*+?()[]{}|\\", *p) != NULL &&
+            (rc = casi_buf_putc(&pattern, '\\')) != CASI_OK)
+            goto done;
+        if ((rc = casi_buf_putc(&pattern, *p)) != CASI_OK)
+            goto done;
+    }
+    if ((rc = casi_buf_putc(&pattern, '$')) != CASI_OK)
+        goto done;
+
+    err = git_config_delete_multivar(cfg->cfg, key, casi_buf_cstr(&pattern));
+    if (err == GIT_ENOTFOUND)
+        rc = casi_error_set(CASI_ENOTFOUND, "not in %s: %s", key, value);
+    else if (err != 0)
+        rc = casi_error_set_git(CASI_ERROR, "cannot remove %s from %s", value, key);
+    else
+        rc = CASI_OK;
+
+done:
+    casi_buf_dispose(&pattern);
+    return rc;
+}
+
 struct foreach_ctx {
     casi_config_cb cb;
     void *payload;

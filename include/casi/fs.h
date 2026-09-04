@@ -38,6 +38,10 @@ int  casi_fs_mkdir_parent(const char *path);
 
 /* Replaces the contents of `out`. */
 int  casi_fs_read_file(const char *path, casi_buf *out);
+/* First `max` bytes only. Transcripts reach hundreds of megabytes and the
+ * fields casi reads to identify one live in the first record, so scanning a
+ * session should never mean reading all of it. */
+int  casi_fs_read_file_prefix(const char *path, size_t max, casi_buf *out);
 
 /*
  * Writes via a sibling temp file plus an atomic replace, so an interrupted

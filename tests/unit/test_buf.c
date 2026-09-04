@@ -83,6 +83,29 @@ static void test_set_replaces(void)
     casi_buf_dispose(&buf);
 }
 
+/*
+ * The class invariant buf.h documents: "a NUL is always kept one past the
+ * end". grow() alone, with nothing written afterward, is the case that broke
+ * this -- realloc() leaves fresh memory uninitialised, and only put/putc/
+ * printf used to restore the terminator. Found via ASan on
+ * casi_encode_project_dir(""), which calls exactly this sequence.
+ */
+static void test_grow_alone_leaves_a_terminated_empty_buffer(void)
+{
+    casi_buf buf = CASI_BUF_INIT;
+
+    ASSERT_OK(casi_buf_grow(&buf, 64));
+    ASSERT_EQ_STR(casi_buf_cstr(&buf), "");
+
+    /* Also across a real reallocation, not just the first allocation. */
+    ASSERT_OK(casi_buf_puts(&buf, "abc"));
+    casi_buf_clear(&buf);
+    ASSERT_OK(casi_buf_grow(&buf, 4096));
+    ASSERT_EQ_STR(casi_buf_cstr(&buf), "");
+
+    casi_buf_dispose(&buf);
+}
+
 static void test_detach_transfers_ownership(void)
 {
     casi_buf buf = CASI_BUF_INIT;
@@ -108,6 +131,7 @@ int main(void)
     RUN_TEST(test_printf_grows);
     RUN_TEST(test_clear_keeps_allocation);
     RUN_TEST(test_set_replaces);
+    RUN_TEST(test_grow_alone_leaves_a_terminated_empty_buffer);
     RUN_TEST(test_detach_transfers_ownership);
     return casi_test_report("buf");
 }
