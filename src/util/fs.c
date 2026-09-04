@@ -221,8 +221,12 @@ int casi_fs_realpath(const char *path, casi_buf *out)
     char *resolved;
     int rc;
 
-    if ((resolved = realpath(path, NULL)) == NULL)
-        return casi_error_set(CASI_ENOTFOUND, "no such directory: %s", path);
+    if ((resolved = realpath(path, NULL)) == NULL) {
+        if (errno == ENOENT || errno == ENOTDIR)
+            return casi_error_set(CASI_ENOTFOUND, "no such directory: %s", path);
+        return casi_error_set(CASI_EIO, "cannot resolve %s: %s",
+                              path, strerror(errno));
+    }
 
     casi_buf_clear(out);
     rc = casi_buf_puts(out, resolved);
@@ -376,12 +380,12 @@ bool casi_fs_ssh_hostkey_is_known(const char *host, const char *fingerprint)
 {
     char line[512], cmd[512];
     FILE *pipe;
-    int found = 0;
+    int command_len, found = 0;
 
     /* `host` reaches a shell and is also an ssh-keygen argument. Reject an
      * empty/option-looking value plus anything outside a hostname's character
      * set instead of trying to quote it. */
-    if (host[0] == '\0' || host[0] == '-')
+    if (host == NULL || fingerprint == NULL || host[0] == '\0' || host[0] == '-')
         return false;
 
     for (const char *p = host; *p != '\0'; p++) {
@@ -391,7 +395,10 @@ bool casi_fs_ssh_hostkey_is_known(const char *host, const char *fingerprint)
             return false;
     }
 
-    snprintf(cmd, sizeof(cmd), "ssh-keygen -l -F %s 2>/dev/null", host);
+    command_len = snprintf(cmd, sizeof(cmd),
+                           "ssh-keygen -l -F %s 2>/dev/null", host);
+    if (command_len < 0 || (size_t)command_len >= sizeof(cmd))
+        return false;
     if ((pipe = popen(cmd, "r")) == NULL)
         return false;
 

@@ -48,7 +48,10 @@ int casi_cmd_push(int argc, char **argv)
     casi_verbose("%zu session(s) scanned, %zu excluded", local.len, excluded);
 
     if (dry_run) {
-        casi_info(unchanged ? "nothing to push" : "would push %zu session(s)", local.len);
+        if (unchanged)
+            casi_info("nothing to push");
+        else
+            casi_info("would push %zu session(s)", local.len);
         rc = CASI_OK;
         goto done;
     }
@@ -66,7 +69,10 @@ int casi_cmd_push(int argc, char **argv)
     if ((rc = casi_repo_push(ctx.repo, casi_buf_cstr(&refname))) != CASI_OK)
         goto done;
 
-    casi_info(unchanged ? "already up to date" : "pushed %zu session(s)", local.len);
+    if (unchanged)
+        casi_info("already up to date");
+    else
+        casi_info("pushed %zu session(s)", local.len);
 
 done:
     casi_buf_dispose(&refname);

@@ -55,6 +55,17 @@ first_warn=$(echo "$out" | grep -n '^warning:' | head -1 | cut -d: -f1)
 [ "$first_info" -lt "$first_warn" ] || fail "status: warning printed before the report (stdout buffering regression)"
 echo "  ok   status: conflict reported, in program order"
 
+# If the configured root disappeared since the last scan, parking the remote
+# side cannot proceed. The soft exit code is only useful if the command also
+# tells the user exactly how to restore that mapping.
+"$casi" config --unset root.src.path >/dev/null
+set +e; out=$("$casi" pull 2>&1); rc=$?; set -e
+[ "$rc" = 5 ] || fail "pull with unmapped conflict: exit $rc, want 5"
+echo "$out" | grep -q 'declare it with: casi config root.src.path <local path>' ||
+    fail "pull with unmapped conflict: missing root declaration guidance"
+echo "  ok   pull: unmapped parked copy reports actionable guidance"
+"$casi" config root.src.path "$work/b/src" >/dev/null
+
 set +e; out=$("$casi" pull 2>&1); rc=$?; set -e
 [ "$rc" = 3 ] || fail "pull with a real divergence: exit $rc, want 3"
 echo "$out" | grep -qi 'unknown error' && fail "pull: leaked the 'unknown error' placeholder"
@@ -72,4 +83,4 @@ echo "  ok   pull: remote copy parked at $parked"
 grep -q 'edited on A' "$sess_b" || fail "--theirs did not take the remote copy"
 echo "  ok   pull --theirs: remote copy adopted"
 
-echo "conflict: 5 passed"
+echo "conflict: 6 passed"

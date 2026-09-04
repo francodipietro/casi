@@ -5,6 +5,13 @@
 #include <string.h>
 #include <time.h>
 
+static void report_unmapped(const casi_buf *root)
+{
+    casi_err("%s", casi_error_last());
+    casi_err("declare it with: casi config root.%s.path <local path>",
+             casi_buf_cstr(root));
+}
+
 /*
  * Parks the remote side of a divergence instead of overwriting the local
  * transcript. Nothing is destroyed and nothing prompts, which is what keeps
@@ -25,6 +32,8 @@ static int park_conflict(casi_ctx *ctx, const casi_entry *remote)
 
     rc = casi_store_materialize_to(ctx->repo, ctx->roots, remote,
                                    casi_buf_cstr(&path), &unmapped);
+    if (rc == CASI_EUNMAPPED)
+        report_unmapped(&unmapped);
     if (rc == CASI_OK)
         casi_warn("diverged: %s", remote->session_id);
     if (rc == CASI_OK)
@@ -103,9 +112,7 @@ int casi_cmd_pull(int argc, char **argv)
         casi_buf_clear(&unmapped);
         rc = casi_store_materialize(ctx.repo, ctx.roots, ctx.provider, r, &unmapped);
         if (rc == CASI_EUNMAPPED) {
-            casi_err("%s", casi_error_last());
-            casi_err("declare it with: casi config root.%s.path <local path>",
-                     casi_buf_cstr(&unmapped));
+            report_unmapped(&unmapped);
             goto done;
         }
         if (rc != CASI_OK)
