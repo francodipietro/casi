@@ -63,9 +63,10 @@ int casi_roots_denormalize_path(const casi_roots *roots, const char *canonical, 
  * reshape numbers and break resuming the session. On Unix, paths contain no
  * character JSON escapes, so literal substitution is safe.
  *
- * `unmapped_out`, when non-NULL, receives the name of the first canonical root
- * that could not be resolved during denormalisation, so the caller can tell
- * the user exactly which `casi config root.<name>.path` line is missing.
+ * `unmapped_out`, when non-NULL, is cleared on entry and receives the name of
+ * the first canonical root that could not be resolved during denormalisation,
+ * so the caller can tell the user exactly which
+ * `casi config root.<name>.path` line is missing.
  */
 int casi_roots_normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf *out);
 int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,

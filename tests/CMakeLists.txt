@@ -6,6 +6,7 @@ set(CASI_UNIT_TESTS
     test_fs
     test_paths
     test_config
+    test_jsonl
     test_encoding
     test_roots
     test_chunk

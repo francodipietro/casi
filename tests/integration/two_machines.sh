@@ -22,6 +22,14 @@ printf '{"type":"user","cwd":"%s","message":"see %s/main.c"}\n' \
     "$work/a/src/myproj" "$work/a/src/myproj" > "$sess"
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
+set +e
+out=$("$casi" init --machine 'bad name' 2>&1)
+rc=$?
+set -e
+[ "$rc" = 2 ] || fail "invalid machine name: exit $rc, want 2"
+echo "$out" | grep -q 'invalid machine name' || fail "invalid machine name: missing error"
+echo "  ok   invalid machine name rejected during init"
+
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
 "$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" push >/dev/null || fail "push from A"
@@ -66,4 +74,4 @@ after_ref=$(git -C "$work/remote.git" rev-parse refs/heads/casi/machine-a)
 [ "$before_ref" = "$after_ref" ] || fail "push with no changes still moved the ref"
 echo "  ok   push with no changes is a no-op"
 
-echo "two_machines: 4 passed"
+echo "two_machines: 5 passed"

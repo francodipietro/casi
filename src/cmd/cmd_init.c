@@ -48,6 +48,9 @@ int casi_cmd_init(int argc, char **argv)
             goto done;
     }
 
+    if ((rc = casi_repo_validate_machine_name(casi_buf_cstr(&machine))) != CASI_OK)
+        goto done;
+
     if ((rc = casi_config_set_string(cfg, "core.machine",
                                      casi_buf_cstr(&machine))) != CASI_OK)
         goto done;

@@ -236,6 +236,7 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
 {
     casi_tree *tree = NULL;
     casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT, meta = CASI_BUF_INIT;
+    casi_buf session_json = CASI_BUF_INIT, project_json = CASI_BUF_INIT;
     size_t i, c;
     int rc;
 
@@ -254,13 +255,18 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
         if ((rc = session_dir(&dir, provider_name, e)) != CASI_OK)
             goto done;
 
+        if ((rc = casi_json_escape_string(e->session_id, &session_json)) != CASI_OK)
+            goto done;
+        if ((rc = casi_json_escape_string(e->project_path, &project_json)) != CASI_OK)
+            goto done;
+
         casi_buf_clear(&meta);
         rc = casi_buf_printf(&meta,
                              "{\"sessionId\":\"%s\","
                              "\"projectPath\":\"%s\","
                              "\"chunks\":%zu,"
                              "\"bytes\":%" PRIu64 "}\n",
-                             e->session_id, e->project_path,
+                             casi_buf_cstr(&session_json), casi_buf_cstr(&project_json),
                              e->chunk_count, e->bytes);
         if (rc != CASI_OK)
             goto done;
@@ -287,6 +293,8 @@ done:
     casi_buf_dispose(&dir);
     casi_buf_dispose(&path);
     casi_buf_dispose(&meta);
+    casi_buf_dispose(&session_json);
+    casi_buf_dispose(&project_json);
     return rc;
 }
 

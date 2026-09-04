@@ -33,6 +33,10 @@ void casi_repo_free(casi_repo *repo);
 
 git_repository *casi_repo_git(casi_repo *repo);
 
+/* A machine label becomes the final component of refs/heads/casi/<machine>.
+ * Validate that invariant before persisting it or trying to create a ref. */
+int casi_repo_validate_machine_name(const char *machine);
+
 int casi_repo_write_blob(casi_repo *repo, const void *data, size_t len, git_oid *out);
 int casi_repo_read_blob(casi_repo *repo, const git_oid *oid, casi_buf *out);
 int casi_repo_has_object(casi_repo *repo, const git_oid *oid);

@@ -82,6 +82,41 @@ git_repository *casi_repo_git(casi_repo *repo)
     return repo->git;
 }
 
+int casi_repo_validate_machine_name(const char *machine)
+{
+    casi_buf refname = CASI_BUF_INIT;
+    int valid = 0;
+    int rc;
+
+    /* One label owns one branch directly below casi/. Allowing '/' would
+     * create nested namespaces and possible directory/file ref collisions. */
+    if (machine == NULL || machine[0] == '\0' || strchr(machine, '/') != NULL)
+        return casi_error_set(CASI_EINVAL,
+                              "invalid machine name \"%s\": expected one valid Git ref component",
+                              machine != NULL ? machine : "");
+
+    if ((rc = casi_buf_printf(&refname, "refs/heads/casi/%s", machine)) != CASI_OK)
+        goto done;
+
+    if (git_reference_name_is_valid(&valid, casi_buf_cstr(&refname)) != 0) {
+        rc = casi_error_set_git(CASI_EINVAL, "cannot validate machine name \"%s\"",
+                                machine);
+        goto done;
+    }
+    if (!valid) {
+        rc = casi_error_set(CASI_EINVAL,
+                            "invalid machine name \"%s\": expected one valid Git ref component",
+                            machine);
+        goto done;
+    }
+
+    rc = CASI_OK;
+
+done:
+    casi_buf_dispose(&refname);
+    return rc;
+}
+
 /* --- objects ---------------------------------------------------------- */
 
 int casi_repo_write_blob(casi_repo *repo, const void *data, size_t len, git_oid *out)

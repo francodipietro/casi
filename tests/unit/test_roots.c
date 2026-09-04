@@ -266,6 +266,7 @@ static void test_text_denormalize_names_the_missing_root(void)
     ASSERT_OK(casi_roots_new(&r));
     ASSERT_OK(casi_roots_add(r, "src", "/Users/f/src"));
     ASSERT_OK(casi_buf_puts(&in, "{\"cwd\":\"casi://vendor/x\"}"));
+    ASSERT_OK(casi_buf_puts(&unmapped, "stale-root"));
 
     ASSERT_RC(casi_roots_denormalize_text(r, &in, &out, &unmapped), CASI_EUNMAPPED);
     ASSERT_EQ_STR(casi_buf_cstr(&unmapped), "vendor");

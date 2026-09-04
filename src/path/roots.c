@@ -376,6 +376,8 @@ int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
     int rc;
 
     casi_buf_clear(out);
+    if (unmapped_out != NULL)
+        casi_buf_clear(unmapped_out);
     if ((rc = casi_buf_grow(out, len)) != CASI_OK)
         return rc;
 
@@ -413,7 +415,7 @@ int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
             }
 
         if (match == NULL) {
-            if (unmapped_out != NULL && unmapped_out->len == 0 &&
+            if (unmapped_out != NULL &&
                 (rc = casi_buf_put(unmapped_out, name, name_len)) != CASI_OK)
                 return rc;
             return casi_error_set(CASI_EUNMAPPED,

@@ -4,6 +4,17 @@
 
 #include <string.h>
 
+static int hex_value(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
 /* Copies a JSON string body into `out`, resolving the escapes that can appear
  * in a path. Stops at the closing quote. Returns bytes consumed, or 0. */
 static size_t unescape_into(const char *p, size_t len, casi_buf *out)
@@ -38,8 +49,20 @@ static size_t unescape_into(const char *p, size_t len, casi_buf *out)
         case 'b':  c = '\b'; break;
         case 'f':  c = '\f'; break;
         case 'u':
-            /* A \u escape cannot appear inside a POSIX path that casi cares
-             * about; keep it verbatim rather than half-decoding it. */
+            /* casi's writer uses \u00XX for control bytes. Decode exactly
+             * those; preserve other Unicode escapes verbatim rather than
+             * pretending this tiny scanner is a full JSON parser. */
+            if (i + 5 < len && p[i + 2] == '0' && p[i + 3] == '0') {
+                int hi = hex_value(p[i + 4]);
+                int lo = hex_value(p[i + 5]);
+
+                if (hi >= 0 && lo >= 0 && ((hi << 4) | lo) < 0x20) {
+                    if (casi_buf_putc(out, (char)((hi << 4) | lo)) != CASI_OK)
+                        return 0;
+                    i += 6;
+                    continue;
+                }
+            }
             if (i + 5 < len && casi_buf_put(out, p + i, 6) == CASI_OK) {
                 i += 6;
                 continue;
@@ -110,6 +133,44 @@ bool casi_jsonl_first_string(const char *data, size_t len, const char *key, casi
     }
 
     return false;
+}
+
+int casi_json_escape_string(const char *value, casi_buf *out)
+{
+    static const char hex[] = "0123456789abcdef";
+    const unsigned char *p = (const unsigned char *)value;
+    int rc;
+
+    casi_buf_clear(out);
+    for (; *p != '\0'; p++) {
+        const char *escape = NULL;
+
+        switch (*p) {
+        case '"':  escape = "\\\""; break;
+        case '\\': escape = "\\\\"; break;
+        case '\b': escape = "\\b";  break;
+        case '\f': escape = "\\f";  break;
+        case '\n': escape = "\\n";  break;
+        case '\r': escape = "\\r";  break;
+        case '\t': escape = "\\t";  break;
+        default: break;
+        }
+
+        if (escape != NULL) {
+            if ((rc = casi_buf_puts(out, escape)) != CASI_OK)
+                return rc;
+        } else if (*p < 0x20) {
+            char encoded[6] = { '\\', 'u', '0', '0',
+                                hex[*p >> 4], hex[*p & 0x0f] };
+
+            if ((rc = casi_buf_put(out, encoded, sizeof(encoded))) != CASI_OK)
+                return rc;
+        } else if ((rc = casi_buf_putc(out, (char)*p)) != CASI_OK) {
+            return rc;
+        }
+    }
+
+    return CASI_OK;
 }
 
 uint64_t casi_json_find_uint(const char *data, size_t len, const char *key)

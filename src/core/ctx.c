@@ -24,6 +24,8 @@ int casi_ctx_open(casi_ctx *ctx)
         rc = CASI_ENOMEM;
         goto fail;
     }
+    if ((rc = casi_repo_validate_machine_name(ctx->machine)) != CASI_OK)
+        goto fail;
 
     if ((rc = casi_roots_new(&ctx->roots)) != CASI_OK)
         goto fail;

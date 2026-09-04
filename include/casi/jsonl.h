@@ -26,6 +26,9 @@ bool casi_json_find_string(const char *data, size_t len, const char *key, casi_b
  * runs and only the first record reflects where it started. */
 bool casi_jsonl_first_string(const char *data, size_t len, const char *key, casi_buf *out);
 
+/* Replaces `out` with `value` escaped for use inside a JSON string. */
+int casi_json_escape_string(const char *value, casi_buf *out);
+
 /* Reads a non-negative integer field; 0 when absent. Sizes only -- casi never
  * needs to interpret a number it did not write. */
 uint64_t casi_json_find_uint(const char *data, size_t len, const char *key);
