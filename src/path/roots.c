@@ -410,6 +410,14 @@ int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
                continues_path_component(name[name_len]))
             name_len++;
 
+        /* The scheme can appear as prose (for example, in a message that
+         * explains how casi works). Without a root name it is not a canonical
+         * path, so leave it alone rather than reporting an empty root. */
+        if (name_len == 0) {
+            i += scheme_len;
+            continue;
+        }
+
         match = NULL;
         for (j = 0; j < roots->len; j++)
             if (strlen(roots->items[j].name) == name_len &&

@@ -307,6 +307,24 @@ static void test_text_root_name_stops_at_path_punctuation(void)
     casi_roots_free(laptop);
 }
 
+static void test_text_bare_scheme_is_literal(void)
+{
+    casi_roots *r = mac_roots();
+    casi_buf in = CASI_BUF_INIT, out = CASI_BUF_INIT, unmapped = CASI_BUF_INIT;
+    const char *text = "{\"message\":\"the scheme casi:// has no root\"}";
+
+    ASSERT_OK(casi_buf_puts(&in, text));
+    ASSERT_OK(casi_buf_puts(&unmapped, "stale-root"));
+    ASSERT_OK(casi_roots_denormalize_text(r, &in, &out, &unmapped));
+    ASSERT_EQ_STR(casi_buf_cstr(&out), text);
+    ASSERT_EQ_INT(unmapped.len, 0);
+
+    casi_buf_dispose(&in);
+    casi_buf_dispose(&out);
+    casi_buf_dispose(&unmapped);
+    casi_roots_free(r);
+}
+
 static void test_loading_roots_from_config(void)
 {
     casi_config *cfg = NULL;
@@ -362,6 +380,7 @@ int main(void)
     RUN_TEST(test_text_denormalize_names_the_missing_root);
     RUN_TEST(test_text_root_name_stops_at_json_delimiters);
     RUN_TEST(test_text_root_name_stops_at_path_punctuation);
+    RUN_TEST(test_text_bare_scheme_is_literal);
     RUN_TEST(test_loading_roots_from_config);
 
     status = casi_test_report("roots");
