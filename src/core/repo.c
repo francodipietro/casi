@@ -2,8 +2,6 @@
 #include "casi/repo.h"
 #include "casi/casi.h"
 
-#include <git2/sys/errors.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -396,9 +394,10 @@ static int credential_cb(git_credential **out, const char *url,
     /* No username/password path: casi never prompts for or stores a secret.
      * For HTTPS remotes the user should use a credential helper via a URL
      * that carries a token, or use SSH. */
-    git_error_set_str(GIT_ERROR_NET,
-                      "no usable credentials (tried the ssh agent); "
-                      "for HTTPS use a token in the URL, or switch to SSH");
+    /* Do not use git_error_set_str() here: it is an internal libgit2 API
+     * whose header is absent from the supported 1.7 development package.
+     * Returning GIT_EAUTH lets libgit2 retain the transport error, which
+     * transport_error() reports to the user. */
     return GIT_EAUTH;
 }
 
@@ -481,10 +480,8 @@ static int certificate_cb(git_cert *cert, int valid, const char *host, void *pay
         if (hostkey_is_known((const git_cert_hostkey *)cert, host))
             return 0;
 
-        git_error_set_str(GIT_ERROR_SSH,
-                          "host key not found in known_hosts. Connect once with "
-                          "`ssh` to record it, or build casi against a libgit2 "
-                          "with the OpenSSH exec backend (see casi --version)");
+        /* See credential_cb(): libgit2 1.7 does not expose its error setter
+         * publicly. GIT_ECERTIFICATE still makes the transport fail closed. */
         return GIT_ECERTIFICATE;
     }
 
