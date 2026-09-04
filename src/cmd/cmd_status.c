@@ -6,17 +6,16 @@
 #include <stdio.h>
 #include <string.h>
 
-static void human_size(uint64_t bytes, casi_buf *out)
+static int human_size(uint64_t bytes, casi_buf *out)
 {
     casi_buf_clear(out);
     if (bytes >= 1024ULL * 1024 * 1024)
-        casi_buf_printf(out, "%.1f GB", (double)bytes / (1024 * 1024 * 1024));
-    else if (bytes >= 1024 * 1024)
-        casi_buf_printf(out, "%.1f MB", (double)bytes / (1024 * 1024));
-    else if (bytes >= 1024)
-        casi_buf_printf(out, "%.0f KB", (double)bytes / 1024);
-    else
-        casi_buf_printf(out, "%" PRIu64 " B", bytes);
+        return casi_buf_printf(out, "%.1f GB", (double)bytes / (1024 * 1024 * 1024));
+    if (bytes >= 1024 * 1024)
+        return casi_buf_printf(out, "%.1f MB", (double)bytes / (1024 * 1024));
+    if (bytes >= 1024)
+        return casi_buf_printf(out, "%.0f KB", (double)bytes / 1024);
+    return casi_buf_printf(out, "%" PRIu64 " B", bytes);
 }
 
 static int status_porcelain(const casi_sync_summary *s)
@@ -69,17 +68,23 @@ int casi_cmd_status(int argc, char **argv)
         goto done;
     }
 
-    if (casi_repo_remote_url(ctx.repo, &url) != CASI_OK) {
+    rc = casi_repo_remote_url(ctx.repo, &url);
+    if (rc == CASI_ENOTFOUND) {
         casi_error_clear();
-        casi_buf_puts(&url, "(none configured)");
+        if ((rc = casi_buf_puts(&url, "(none configured)")) != CASI_OK)
+            goto done;
+    } else if (rc != CASI_OK) {
+        goto done;
     }
 
     casi_info("machine: %s   remote: %s", ctx.machine, casi_buf_cstr(&url));
     casi_info("%s", "");
 
-    human_size(summary.push_bytes, &size);
+    if ((rc = human_size(summary.push_bytes, &size)) != CASI_OK)
+        goto done;
     casi_info("  to push      %4zu sessions   %s", summary.to_push, casi_buf_cstr(&size));
-    human_size(summary.pull_bytes, &size);
+    if ((rc = human_size(summary.pull_bytes, &size)) != CASI_OK)
+        goto done;
     casi_info("  to pull      %4zu sessions   %s", summary.to_pull, casi_buf_cstr(&size));
     casi_info("  up to date   %4zu sessions", summary.up_to_date);
     if (summary.excluded > 0)
