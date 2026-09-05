@@ -16,6 +16,7 @@
  *   sessions/<provider>/<project-id>/<session-id>/meta.json
  *   sessions/<provider>/<project-id>/<session-id>/chunks/000000 ...
  *   sessions/<provider>/<project-id>/<session-id>/subagents/<file>
+ *   projects/<provider>/<project-id>/meta.json
  *   projects/<provider>/<project-id>/memory/<file>
  *
  * Content is normalised through the roots table BEFORE it is chunked, so two

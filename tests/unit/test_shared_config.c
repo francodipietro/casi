@@ -79,6 +79,7 @@ static void test_rejects_bad_shared_values(void)
 
     ASSERT_RC(casi_shared_config_add_root(&cfg, "~"), CASI_EINVAL);
     ASSERT_RC(casi_shared_config_add_root(&cfg, "bad/name"), CASI_EINVAL);
+    ASSERT_RC(casi_shared_config_add_exclude(&cfg, NULL), CASI_EINVAL);
     ASSERT_RC(casi_shared_config_add_exclude(&cfg, "/Users/me/private"), CASI_EINVAL);
     ASSERT_RC(casi_shared_config_parse(&cfg,
                                        "{\"format\":1,\"roots\":{}}", 24),
@@ -96,6 +97,7 @@ static void test_parse_enforces_shared_config_invariants(void)
     const char invalid_root[] = "{\"format\":1,\"roots\":[\"bad/name\"]}";
     const char invalid_exclude[] =
         "{\"format\":1,\"sync\":{\"exclude\":[\"/tmp/private\"]}}";
+    const char malformed_exclude[] = "{\"format\":1,\"sync\":{\"exclude\":{}}}";
     const char forward_compatible[] =
         "{\"format\":1,\"excluded\":[],\"note\":\"roots remain optional\"}";
     casi_shared_config cfg = { 0 };
@@ -108,6 +110,9 @@ static void test_parse_enforces_shared_config_invariants(void)
     ASSERT_RC(casi_shared_config_parse(&cfg, invalid_root, strlen(invalid_root)), CASI_EINVAL);
     ASSERT_RC(casi_shared_config_parse(&cfg, invalid_exclude, strlen(invalid_exclude)),
               CASI_EINVAL);
+    ASSERT_RC(casi_shared_config_parse(&cfg, malformed_exclude,
+                                       strlen(malformed_exclude)), CASI_EINVAL);
+    ASSERT_TRUE(strstr(casi_error_last(), "sync.exclude") != NULL);
     ASSERT_OK(casi_shared_config_parse(&cfg, forward_compatible,
                                        strlen(forward_compatible)));
     ASSERT_EQ_INT(cfg.roots.len, 0);
