@@ -223,22 +223,26 @@ int casi_shared_config_commit_push(casi_repo *repo, const casi_shared_config *cf
         (rc = casi_tree_write(tree, &tree_oid)) != CASI_OK)
         goto done;
 
-    if (casi_repo_ref_tree(repo, CASI_SHARED_CONFIG_REF, &existing_tree) == CASI_OK &&
-        git_oid_equal(&tree_oid, &existing_tree)) {
-        git_oid remote_tree;
+    rc = casi_repo_ref_tree(repo, CASI_SHARED_CONFIG_REF, &existing_tree);
+    if (rc == CASI_OK) {
+        if (git_oid_equal(&tree_oid, &existing_tree)) {
+            git_oid remote_tree;
 
-        /* A prior push can fail after the local commit is created. In that
-         * state the next identical update still has work to do: publish the
-         * local config ref unless the freshly fetched remote already has it. */
-        rc = casi_repo_ref_tree(repo, CASI_SHARED_CONFIG_REMOTE_REF, &remote_tree);
-        if (rc == CASI_OK && git_oid_equal(&tree_oid, &remote_tree)) {
-            rc = CASI_OK;
+            /* A prior push can fail after the local commit is created. In that
+             * state the next identical update still has work to do: publish the
+             * local config ref unless the freshly fetched remote already has it. */
+            rc = casi_repo_ref_tree(repo, CASI_SHARED_CONFIG_REMOTE_REF, &remote_tree);
+            if (rc == CASI_OK && git_oid_equal(&tree_oid, &remote_tree)) {
+                rc = CASI_OK;
+                goto done;
+            }
+            if (rc != CASI_ENOTFOUND)
+                goto done;
+            casi_error_clear();
+            rc = casi_repo_push(repo, CASI_SHARED_CONFIG_REF);
             goto done;
         }
-        if (rc != CASI_ENOTFOUND)
-            goto done;
-        casi_error_clear();
-        rc = casi_repo_push(repo, CASI_SHARED_CONFIG_REF);
+    } else if (rc != CASI_ENOTFOUND) {
         goto done;
     }
     casi_error_clear();
