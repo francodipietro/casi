@@ -2,29 +2,14 @@
 #include "casi/sync.h"
 #include "casi/error.h"
 
+#include <stdbool.h>
 #include <git2.h>
 #include <string.h>
 
-/* Reassemble only the portion after the sealed prefix. This is normally one
- * sub-megabyte tail; reading more is reserved for a real rewrite, where the
- * exact answer is worth the exceptional cost. */
-static int read_tail(casi_repo *repo, const casi_entry *entry, size_t from,
-                     casi_buf *out)
+static bool is_prefix(const casi_buf *prefix, const casi_buf *whole)
 {
-    casi_buf piece = CASI_BUF_INIT;
-    size_t i;
-    int rc = CASI_OK;
-
-    casi_buf_clear(out);
-    for (i = from; i < entry->chunk_count; i++) {
-        if ((rc = casi_repo_read_blob(repo, &entry->chunks[i], &piece)) != CASI_OK)
-            break;
-        if ((rc = casi_buf_put(out, piece.ptr, piece.len)) != CASI_OK)
-            break;
-    }
-
-    casi_buf_dispose(&piece);
-    return rc;
+    return prefix->len <= whole->len &&
+           (prefix->len == 0 || memcmp(prefix->ptr, whole->ptr, prefix->len) == 0);
 }
 
 int casi_sync_compare(casi_repo *repo, const casi_entry *local,
@@ -51,16 +36,24 @@ int casi_sync_compare(casi_repo *repo, const casi_entry *local,
             return CASI_OK;
         }
 
-        if ((rc = read_tail(repo, local, i, &local_tail)) != CASI_OK)
+        /* The same index is the only mutable blob that can establish an
+         * append. Do not reassemble later chunks: they cannot affect whether
+         * the shorter side ends inside this one, and could be arbitrarily
+         * large under a genuine rewrite. */
+        if ((rc = casi_repo_read_blob(repo, &local->chunks[i], &local_tail)) != CASI_OK)
             goto done;
-        if ((rc = read_tail(repo, remote, i, &remote_tail)) != CASI_OK)
+        if ((rc = casi_repo_read_blob(repo, &remote->chunks[i], &remote_tail)) != CASI_OK)
             goto done;
 
-        if (local_tail.len <= remote_tail.len &&
-            memcmp(local_tail.ptr, remote_tail.ptr, local_tail.len) == 0)
+        if (local->chunk_count < remote->chunk_count)
+            *out = is_prefix(&local_tail, &remote_tail)
+                 ? CASI_SYNC_REMOTE_AHEAD : CASI_SYNC_DIVERGED;
+        else if (remote->chunk_count < local->chunk_count)
+            *out = is_prefix(&remote_tail, &local_tail)
+                 ? CASI_SYNC_LOCAL_AHEAD : CASI_SYNC_DIVERGED;
+        else if (is_prefix(&local_tail, &remote_tail))
             *out = CASI_SYNC_REMOTE_AHEAD;
-        else if (remote_tail.len <= local_tail.len &&
-                 memcmp(remote_tail.ptr, local_tail.ptr, remote_tail.len) == 0)
+        else if (is_prefix(&remote_tail, &local_tail))
             *out = CASI_SYNC_LOCAL_AHEAD;
         else
             *out = CASI_SYNC_DIVERGED;

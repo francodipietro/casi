@@ -436,6 +436,7 @@ static int default_key_credential(git_credential **out, const char *username,
 
     while (auth->next_default_key < sizeof(names) / sizeof(names[0])) {
         const char *name = names[auth->next_default_key++];
+        casi_stat st;
         int rc;
 
         casi_buf_clear(&auth->private_key);
@@ -444,14 +445,25 @@ static int default_key_credential(git_credential **out, const char *username,
             (rc = casi_buf_printf(&auth->public_key, "%s/.ssh/%s.pub", home, name)) != CASI_OK)
             return GIT_ERROR;
 
-        if (!casi_fs_exists(casi_buf_cstr(&auth->private_key))) {
+        rc = casi_fs_stat(casi_buf_cstr(&auth->private_key), &st);
+        if (rc == CASI_ENOTFOUND) {
             casi_error_clear();
             continue;
         }
-        if (!casi_fs_exists(casi_buf_cstr(&auth->public_key))) {
+        if (rc != CASI_OK)
+            return GIT_ERROR;
+        if (st.is_dir)
+            continue;
+
+        rc = casi_fs_stat(casi_buf_cstr(&auth->public_key), &st);
+        if (rc == CASI_ENOTFOUND) {
             casi_error_clear();
             continue;
         }
+        if (rc != CASI_OK)
+            return GIT_ERROR;
+        if (st.is_dir)
+            continue;
 
         return git_credential_ssh_key_new(out, username,
                                           casi_buf_cstr(&auth->public_key),
