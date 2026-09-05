@@ -39,6 +39,7 @@ int casi_repo_validate_machine_name(const char *machine);
 
 int casi_repo_write_blob(casi_repo *repo, const void *data, size_t len, git_oid *out);
 int casi_repo_read_blob(casi_repo *repo, const git_oid *oid, casi_buf *out);
+int casi_repo_blob_size(casi_repo *repo, const git_oid *oid, uint64_t *out);
 int casi_repo_has_object(casi_repo *repo, const git_oid *oid);
 
 /*

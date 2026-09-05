@@ -558,6 +558,7 @@ static int read_session_entry(casi_repo *repo, const git_oid *tree,
                                   project_id, session_id, asset.name)) != CASI_OK ||
             (rc = casi_repo_tree_entry_oid(repo, tree, casi_buf_cstr(&path),
                                            &asset.oid)) != CASI_OK ||
+            (rc = casi_repo_blob_size(repo, &asset.oid, &asset.bytes)) != CASI_OK ||
             (rc = casi_asset_list_push_owned(assets_out, &asset)) != CASI_OK) {
             asset_dispose(&asset);
             goto done;
@@ -624,6 +625,7 @@ static int read_project_assets(casi_repo *repo, const git_oid *tree,
                                   project_id, asset.name)) != CASI_OK ||
             (rc = casi_repo_tree_entry_oid(repo, tree, casi_buf_cstr(&path),
                                            &asset.oid)) != CASI_OK ||
+            (rc = casi_repo_blob_size(repo, &asset.oid, &asset.bytes)) != CASI_OK ||
             (rc = casi_asset_list_push_owned(assets_out, &asset)) != CASI_OK) {
             asset_dispose(&asset);
             goto done;

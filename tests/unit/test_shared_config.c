@@ -1,10 +1,13 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 #include "casi/casi.h"
+#include "casi/repo.h"
 #include "casi/shared_config.h"
 
 #include "casi_test.h"
 
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void test_serialization_is_deterministic(void)
 {
@@ -121,6 +124,33 @@ static void test_parse_enforces_shared_config_invariants(void)
     casi_shared_config_dispose(&cfg);
 }
 
+static void test_identical_config_retries_an_unpublished_ref(void)
+{
+    char home[] = "/tmp/casi-shared-config-XXXXXX";
+    casi_repo *repo = NULL;
+    casi_shared_config cfg = { 0 };
+
+    ASSERT_TRUE(mkdtemp(home) != NULL);
+    ASSERT_EQ_INT(setenv("CASI_HOME", home, 1), 0);
+    casi_paths_reset();
+
+    ASSERT_OK(casi_repo_init(&repo));
+    ASSERT_OK(casi_shared_config_add_root(&cfg, "src"));
+
+    /* The first failure happens after the local commit was written. The
+     * second identical call must retry the push, rather than mistaking that
+     * local commit for a successfully published configuration. */
+    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, "test-machine"),
+              CASI_ENOTFOUND);
+    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, "test-machine"),
+              CASI_ENOTFOUND);
+
+    casi_shared_config_dispose(&cfg);
+    casi_repo_free(repo);
+    unsetenv("CASI_HOME");
+    casi_paths_reset();
+}
+
 int main(void)
 {
     int status;
@@ -134,6 +164,7 @@ int main(void)
     RUN_TEST(test_parse_does_not_require_a_nul_terminator);
     RUN_TEST(test_rejects_bad_shared_values);
     RUN_TEST(test_parse_enforces_shared_config_invariants);
+    RUN_TEST(test_identical_config_retries_an_unpublished_ref);
 
     status = casi_test_report("shared_config");
     casi_shutdown();

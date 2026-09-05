@@ -156,6 +156,18 @@ int casi_repo_read_blob(casi_repo *repo, const git_oid *oid, casi_buf *out)
     return rc;
 }
 
+int casi_repo_blob_size(casi_repo *repo, const git_oid *oid, uint64_t *out)
+{
+    git_blob *blob = NULL;
+    int rc = CASI_OK;
+
+    if (git_blob_lookup(&blob, repo->git, oid) != 0)
+        return casi_error_set_git(CASI_ENOTFOUND, "cannot read blob size");
+    *out = (uint64_t)git_blob_rawsize(blob);
+    git_blob_free(blob);
+    return rc;
+}
+
 int casi_repo_has_object(casi_repo *repo, const git_oid *oid)
 {
     git_odb *odb = NULL;

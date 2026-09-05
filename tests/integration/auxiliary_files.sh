@@ -40,6 +40,10 @@ mkdir -p "$work/b/code/proj" "$work/b/.claude"
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-b >/dev/null
 "$casi" config root.src.path "$work/b/code" >/dev/null
+"$casi" doctor >/dev/null || fail "fetch remote state for B status"
+out=$("$casi" status --porcelain)
+echo "$out" | awk -F '\t' '$1 == "aux-pull" && $2 == 3 && $3 > 0 { found = 1 } END { exit !found }' ||
+    fail "status does not report remote auxiliary bytes"
 "$casi" pull >/dev/null || fail "pull into B"
 enc_b=$(echo "$work/b/code/proj" | sed 's/[^a-zA-Z0-9]/-/g')
 base_b="$work/b/.claude/projects/$enc_b"
