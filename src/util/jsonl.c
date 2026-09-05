@@ -147,6 +147,13 @@ bool casi_json_find_string(const char *data, size_t len, const char *key, casi_b
     return false;
 }
 
+bool casi_json_has_key(const char *data, size_t len, const char *key)
+{
+    size_t value;
+
+    return find_value_start(data, len, key, &value);
+}
+
 bool casi_json_find_string_array(const char *data, size_t len, const char *key,
                                  casi_strvec *out)
 {

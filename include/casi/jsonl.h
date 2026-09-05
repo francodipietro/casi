@@ -29,6 +29,10 @@ bool casi_json_find_string(const char *data, size_t len, const char *key, casi_b
 bool casi_json_find_string_array(const char *data, size_t len, const char *key,
                                  casi_strvec *out);
 
+/* Whether an actual JSON object key named `key` appears in `data`. Unlike a
+ * raw byte search, this does not mistake another key or a string value for it. */
+bool casi_json_has_key(const char *data, size_t len, const char *key);
+
 /* Same, but scans line by line and returns the first line that has the key --
  * how the canonical project path is recovered, since `cwd` moves as a session
  * runs and only the first record reflects where it started. */

@@ -38,8 +38,11 @@ void casi_shared_config_dispose(casi_shared_config *cfg)
 
 int casi_shared_config_add_root(casi_shared_config *cfg, const char *name)
 {
-    if (name[0] == '\0')
+    if (name == NULL || name[0] == '\0')
         return casi_error_set(CASI_EINVAL, "shared root name cannot be empty");
+    if (!casi_root_name_is_valid(name))
+        return casi_error_set(CASI_EINVAL,
+                              "shared root name \"%s\" contains an invalid character", name);
     if (strcmp(name, CASI_HOME_ROOT) == 0)
         return casi_error_set(CASI_EINVAL, "the implicit ~ root is not shared");
     return add_unique(&cfg->roots, name);
@@ -79,8 +82,6 @@ bool casi_shared_config_is_excluded(const casi_shared_config *cfg,
 static int parse_array_or_empty(const char *data, size_t len, const char *key,
                                 casi_strvec *out)
 {
-    size_t key_len = strlen(key), i;
-
     if (casi_json_find_string_array(data, len, key, out)) {
         casi_strvec_sort(out);
         return CASI_OK;
@@ -89,15 +90,16 @@ static int parse_array_or_empty(const char *data, size_t len, const char *key,
     /* The two fields are optional only for the old Phase 1 {"format":1}
      * shape. If a named field is present but cannot be read as a string array,
      * fail closed instead of silently dropping an exclusion. */
-    for (i = 0; i + key_len <= len; i++)
-        if (memcmp(data + i, key, key_len) == 0)
-            return casi_error_set(CASI_EINVAL, "malformed %s array in casi.json", key);
+    if (casi_json_has_key(data, len, key))
+        return casi_error_set(CASI_EINVAL, "malformed %s array in casi.json", key);
     return CASI_OK;
 }
 
 int casi_shared_config_parse(casi_shared_config *cfg, const char *data, size_t len)
 {
     casi_shared_config parsed = { 0 };
+    casi_strvec roots = CASI_STRVEC_INIT, exclude = CASI_STRVEC_INIT;
+    size_t i;
     int rc;
 
     if (len == 0) {
@@ -106,15 +108,25 @@ int casi_shared_config_parse(casi_shared_config *cfg, const char *data, size_t l
     }
     if (casi_json_find_uint(data, len, "format") != CASI_SHARED_CONFIG_FORMAT)
         return casi_error_set(CASI_EINVAL, "unsupported or missing casi.json format");
-    if ((rc = parse_array_or_empty(data, len, "roots", &parsed.roots)) != CASI_OK ||
-        (rc = parse_array_or_empty(data, len, "exclude", &parsed.exclude)) != CASI_OK)
+    if ((rc = parse_array_or_empty(data, len, "roots", &roots)) != CASI_OK ||
+        (rc = parse_array_or_empty(data, len, "exclude", &exclude)) != CASI_OK)
         goto done;
+    for (i = 0; i < roots.len; i++)
+        if ((rc = casi_shared_config_add_root(&parsed, roots.items[i])) != CASI_OK)
+            goto done;
+    for (i = 0; i < exclude.len; i++)
+        if ((rc = casi_shared_config_add_exclude(&parsed, exclude.items[i])) != CASI_OK)
+            goto done;
 
     casi_shared_config_dispose(cfg);
     *cfg = parsed;
+    casi_strvec_dispose(&roots);
+    casi_strvec_dispose(&exclude);
     return CASI_OK;
 
 done:
+    casi_strvec_dispose(&roots);
+    casi_strvec_dispose(&exclude);
     casi_shared_config_dispose(&parsed);
     return rc;
 }

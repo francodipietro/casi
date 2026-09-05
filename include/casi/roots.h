@@ -35,6 +35,8 @@ void casi_roots_free(casi_roots *roots);
 
 /* Later additions of the same name replace the earlier path. */
 int  casi_roots_add(casi_roots *roots, const char *name, const char *local_path);
+/* True when `name` can safely be used as one component of a canonical root. */
+bool casi_root_name_is_valid(const char *name);
 /* Reads every root.<name>.path out of the config, then adds the implicit
  * "~" root from the environment. */
 int  casi_roots_load(casi_roots *roots, casi_config *cfg);
