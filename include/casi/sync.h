@@ -5,12 +5,14 @@
 #include "casi/store.h"
 
 /*
- * Because transcripts only ever gain bytes at the end, comparing two chunk-id
- * lists answers everything -- with no timestamps and therefore no clock skew,
- * no mtime games, and no dependence on machines agreeing about the time.
+ * Because transcripts only ever gain bytes at the end, comparing their sealed
+ * chunk ids plus, when necessary, the single unsealed tail answers everything
+ * -- with no timestamps and therefore no clock skew, no mtime games, and no
+ * dependence on machines agreeing about the time.
  *
- * Only the final chunk of a session can be partial, so the comparison is
- * exact rather than heuristic.
+ * Only the final chunk of the shorter side can have changed through a valid
+ * append. Its bytes are read only after the cheap OID comparison reaches it,
+ * which keeps the common path metadata-only while making the result exact.
  *
  * The design does not *assume* strict append-only. A rewritten prefix -- a
  * rewind, a compaction -- simply fails the prefix test and surfaces as a
@@ -23,7 +25,8 @@ typedef enum {
     CASI_SYNC_DIVERGED       /* neither is a prefix; real conflict   */
 } casi_sync_relation;
 
-casi_sync_relation casi_sync_compare(const casi_entry *local, const casi_entry *remote);
+int casi_sync_compare(casi_repo *repo, const casi_entry *local,
+                      const casi_entry *remote, casi_sync_relation *out);
 
 const char *casi_sync_relation_name(casi_sync_relation relation);
 

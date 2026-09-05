@@ -10,9 +10,11 @@
  * would produce a second 137 MB blob on every push.
  *
  * Splitting deterministically from byte 0, always cutting just after a
- * newline, means every earlier chunk stays byte-identical as the file grows
- * and hashes to the same object id. A push then adds exactly one new blob.
- * No rolling window, no content-defined chunking, no delta logic.
+ * newline, means every sealed chunk stays byte-identical as the file grows
+ * and hashes to the same object id. The unsealed tail can be replaced until
+ * it reaches the target, so an append transfers at most that tail rather than
+ * the whole transcript. No rolling window, no content-defined chunking, no
+ * delta logic.
  *
  * The boundary rule: a chunk runs to at least CASI_CHUNK_TARGET bytes and
  * then to the end of the line it lands in. Only the final chunk may be

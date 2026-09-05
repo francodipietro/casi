@@ -57,7 +57,8 @@ int casi_cmd_status(int argc, char **argv)
     if ((rc = casi_ops_load_remote(&ctx, &remote)) != CASI_OK)
         goto done;
 
-    casi_ops_summarise(&local, &remote, &summary);
+    if ((rc = casi_ops_summarise(ctx.repo, &local, &remote, &summary)) != CASI_OK)
+        goto done;
     summary.excluded = excluded;
 
     if (porcelain) {
