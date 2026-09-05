@@ -46,6 +46,7 @@ set(CASI_INTEGRATION_TESTS
     shared_config
     doctor
     auxiliary_files
+    nested_roots
 )
 foreach(test_name IN LISTS CASI_INTEGRATION_TESTS)
     add_test(NAME ${test_name}
