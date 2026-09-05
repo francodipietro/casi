@@ -79,6 +79,8 @@ bool casi_shared_config_is_excluded(const casi_shared_config *cfg,
 static int parse_array_or_empty(const char *data, size_t len, const char *key,
                                 casi_strvec *out)
 {
+    size_t key_len = strlen(key), i;
+
     if (casi_json_find_string_array(data, len, key, out)) {
         casi_strvec_sort(out);
         return CASI_OK;
@@ -87,8 +89,9 @@ static int parse_array_or_empty(const char *data, size_t len, const char *key,
     /* The two fields are optional only for the old Phase 1 {"format":1}
      * shape. If a named field is present but cannot be read as a string array,
      * fail closed instead of silently dropping an exclusion. */
-    if (strstr(data, key) != NULL)
-        return casi_error_set(CASI_EINVAL, "malformed %s array in casi.json", key);
+    for (i = 0; i + key_len <= len; i++)
+        if (memcmp(data + i, key, key_len) == 0)
+            return casi_error_set(CASI_EINVAL, "malformed %s array in casi.json", key);
     return CASI_OK;
 }
 

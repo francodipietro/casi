@@ -4,17 +4,54 @@
 
 #include <string.h>
 
-int casi_ops_scan_local(casi_ctx *ctx, casi_entry_list *out, size_t *excluded_out)
+int casi_ops_scan_local(casi_ctx *ctx, casi_entry_list *out,
+                         casi_asset_list *assets_out, size_t *excluded_out)
 {
     casi_strvec exclude = CASI_STRVEC_INIT;
     int rc;
 
     if ((rc = casi_ctx_exclude_list(ctx, &exclude)) == CASI_OK)
         rc = casi_store_scan_local(ctx->repo, ctx->roots, ctx->provider,
-                                   &exclude, out, excluded_out);
+                                   &exclude, out, assets_out, excluded_out);
 
     casi_strvec_dispose(&exclude);
     return rc;
+}
+
+static int merge_assets(casi_asset_list *into, casi_asset_list *from)
+{
+    size_t i;
+    int rc;
+
+    for (i = 0; i < from->len; i++) {
+        casi_asset *incoming = &from->items[i];
+        casi_asset *have = casi_asset_list_find(into, incoming->kind,
+                                                incoming->project_id,
+                                                incoming->session_id,
+                                                incoming->name);
+
+        if (have == NULL) {
+            casi_asset moved = *incoming;
+
+            memset(incoming, 0, sizeof(*incoming));
+            if ((rc = casi_asset_list_push_owned(into, &moved)) != CASI_OK)
+                return rc;
+            continue;
+        }
+
+        /* Auxiliary files have no safe append rule. Never choose one of two
+         * different remote versions arbitrarily: pull will keep the local
+         * file and report the conflict explicitly instead. */
+        if (!git_oid_equal(&have->oid, &incoming->oid)) {
+            casi_warn("auxiliary file has conflicting remote versions: %s",
+                      incoming->name);
+            return casi_error_set(CASI_ECONFLICT,
+                                  "auxiliary file %s has conflicting remote versions",
+                                  incoming->name);
+        }
+    }
+
+    return CASI_OK;
 }
 
 /* Folds one machine's entries into the accumulating union. */
@@ -56,7 +93,8 @@ static int merge_branch(casi_repo *repo, casi_entry_list *into, casi_entry_list 
     return CASI_OK;
 }
 
-int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out)
+int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out,
+                          casi_asset_list *assets_out)
 {
     casi_strvec machines = CASI_STRVEC_INIT;
     casi_buf refname = CASI_BUF_INIT;
@@ -68,6 +106,7 @@ int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out)
 
     for (i = 0; i < machines.len; i++) {
         casi_entry_list branch;
+        casi_asset_list branch_assets;
         git_oid tree;
 
         /* Our own branch is what we are comparing against, not part of the
@@ -86,10 +125,15 @@ int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out)
         }
 
         memset(&branch, 0, sizeof(branch));
-        rc = casi_store_read_tree(ctx->repo, &tree, ctx->provider->name, &branch);
+        memset(&branch_assets, 0, sizeof(branch_assets));
+        rc = casi_store_read_tree(ctx->repo, &tree, ctx->provider->name, &branch,
+                                  &branch_assets);
         if (rc == CASI_OK)
             rc = merge_branch(ctx->repo, out, &branch);
+        if (rc == CASI_OK)
+            rc = merge_assets(assets_out, &branch_assets);
         casi_entry_list_dispose(&branch);
+        casi_asset_list_dispose(&branch_assets);
 
         if (rc != CASI_OK)
             goto done;
@@ -104,7 +148,8 @@ done:
 }
 
 int casi_ops_summarise(casi_repo *repo, casi_entry_list *local,
-                       casi_entry_list *remote, casi_sync_summary *out)
+                       casi_entry_list *remote, casi_asset_list *local_assets,
+                       casi_asset_list *remote_assets, casi_sync_summary *out)
 {
     size_t i;
     int rc;
@@ -150,6 +195,31 @@ int casi_ops_summarise(casi_repo *repo, casi_entry_list *local,
             out->to_pull++;
             out->pull_bytes += remote->items[i].bytes;
         }
+
+    for (i = 0; i < local_assets->len; i++) {
+        casi_asset *local_asset = &local_assets->items[i];
+        casi_asset *remote_asset = casi_asset_list_find(remote_assets, local_asset->kind,
+                                                         local_asset->project_id,
+                                                         local_asset->session_id,
+                                                         local_asset->name);
+
+        if (remote_asset == NULL) {
+            out->auxiliary_to_push++;
+            out->auxiliary_push_bytes += local_asset->bytes;
+        } else if (!git_oid_equal(&local_asset->oid, &remote_asset->oid)) {
+            out->auxiliary_conflicts++;
+        }
+    }
+    for (i = 0; i < remote_assets->len; i++) {
+        casi_asset *remote_asset = &remote_assets->items[i];
+
+        if (casi_asset_list_find(local_assets, remote_asset->kind,
+                                 remote_asset->project_id, remote_asset->session_id,
+                                 remote_asset->name) == NULL) {
+            out->auxiliary_to_pull++;
+            out->auxiliary_pull_bytes += remote_asset->bytes;
+        }
+    }
 
     return CASI_OK;
 }

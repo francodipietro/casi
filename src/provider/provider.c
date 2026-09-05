@@ -71,3 +71,34 @@ void casi_session_list_dispose(casi_session_list *list)
     free(list->items);
     memset(list, 0, sizeof(*list));
 }
+
+int casi_aux_file_list_push(casi_aux_file_list *list, const casi_aux_file *file)
+{
+    if (list->len == list->cap) {
+        size_t cap = list->cap ? list->cap * 2 : 16;
+        casi_aux_file *p = realloc(list->items, cap * sizeof(*p));
+
+        if (p == NULL)
+            return casi_error_set(CASI_ENOMEM, "out of memory listing auxiliary files");
+        list->items = p;
+        list->cap = cap;
+    }
+
+    list->items[list->len++] = *file;
+    return CASI_OK;
+}
+
+void casi_aux_file_list_dispose(casi_aux_file_list *list)
+{
+    size_t i;
+
+    for (i = 0; i < list->len; i++) {
+        free(list->items[i].local_path);
+        free(list->items[i].project_path);
+        free(list->items[i].project_id);
+        free(list->items[i].session_id);
+        free(list->items[i].name);
+    }
+    free(list->items);
+    memset(list, 0, sizeof(*list));
+}

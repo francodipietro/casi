@@ -14,8 +14,8 @@
  *   ~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents/...
  *   ~/.claude/projects/<encoded-cwd>/memory/ (markdown notes)
  *
- * v1 syncs the transcripts. The sidecar and memory directories arrive in
- * phase 2, which is why discover() skips anything that is not a .jsonl.
+ * Transcripts, per-session subagents, and per-project memory are discovered
+ * separately because only the transcript participates in append comparison.
  */
 
 /* How much of a transcript to read when all that is wanted is the project it
@@ -66,24 +66,154 @@ done:
 
 static bool is_session_file(const char *name)
 {
-    /* "<uuid>.jsonl" and nothing else: memory/ and the per-session sidecar
-     * directories are phase 2. */
+    /* "<uuid>.jsonl" at the top of a project directory. */
     return casi_str_has_suffix(name, ".jsonl");
 }
 
+static bool is_subagent_file(const char *name)
+{
+    return casi_str_has_prefix(name, "agent-") &&
+           (casi_str_has_suffix(name, ".jsonl") ||
+            casi_str_has_suffix(name, ".meta.json"));
+}
+
+static int add_aux_file(casi_aux_file_list *out, casi_aux_kind kind,
+                        const casi_session *session, const char *path,
+                        const char *name)
+{
+    casi_aux_file file;
+    int rc;
+
+    memset(&file, 0, sizeof(file));
+    file.kind = kind;
+    file.local_path = casi_strdup(path);
+    file.project_path = casi_strdup(session->project_path);
+    file.project_id = casi_strdup(session->project_id);
+    file.session_id = kind == CASI_AUX_SUBAGENT ? casi_strdup(session->session_id) : NULL;
+    file.name = casi_strdup(name);
+    if (file.local_path == NULL || file.project_path == NULL ||
+        file.project_id == NULL || file.name == NULL ||
+        (kind == CASI_AUX_SUBAGENT && file.session_id == NULL)) {
+        free(file.local_path);
+        free(file.project_path);
+        free(file.project_id);
+        free(file.session_id);
+        free(file.name);
+        return casi_error_set(CASI_ENOMEM, "out of memory listing auxiliary file");
+    }
+
+    rc = casi_aux_file_list_push(out, &file);
+    if (rc != CASI_OK) {
+        free(file.local_path);
+        free(file.project_path);
+        free(file.project_id);
+        free(file.session_id);
+        free(file.name);
+    }
+    return rc;
+}
+
+static int discover_subagents(const char *project_dir, const casi_session *session,
+                              casi_aux_file_list *out)
+{
+    casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT;
+    casi_strvec names = CASI_STRVEC_INIT;
+    size_t i;
+    int rc;
+
+    if ((rc = casi_buf_printf(&dir, "%s/%s/subagents", project_dir,
+                              session->session_id)) != CASI_OK)
+        goto done;
+    rc = casi_fs_listdir(casi_buf_cstr(&dir), &names);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        rc = CASI_OK;
+        goto done;
+    }
+    if (rc != CASI_OK)
+        goto done;
+
+    for (i = 0; i < names.len; i++) {
+        casi_stat st;
+
+        if (!is_subagent_file(names.items[i]))
+            continue;
+        casi_buf_clear(&path);
+        if ((rc = casi_fs_join(&path, casi_buf_cstr(&dir), names.items[i])) != CASI_OK)
+            goto done;
+        if ((rc = casi_fs_stat(casi_buf_cstr(&path), &st)) != CASI_OK)
+            goto done;
+        if (!st.is_dir &&
+            (rc = add_aux_file(out, CASI_AUX_SUBAGENT, session,
+                               casi_buf_cstr(&path), names.items[i])) != CASI_OK)
+            goto done;
+    }
+
+    rc = CASI_OK;
+done:
+    casi_strvec_dispose(&names);
+    casi_buf_dispose(&dir);
+    casi_buf_dispose(&path);
+    return rc;
+}
+
+static int discover_memory(const char *project_dir, const casi_session *session,
+                           casi_aux_file_list *out)
+{
+    casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT;
+    casi_strvec names = CASI_STRVEC_INIT;
+    size_t i;
+    int rc;
+
+    if ((rc = casi_buf_printf(&dir, "%s/memory", project_dir)) != CASI_OK)
+        goto done;
+    rc = casi_fs_listdir(casi_buf_cstr(&dir), &names);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        rc = CASI_OK;
+        goto done;
+    }
+    if (rc != CASI_OK)
+        goto done;
+
+    for (i = 0; i < names.len; i++) {
+        casi_stat st;
+
+        casi_buf_clear(&path);
+        if ((rc = casi_fs_join(&path, casi_buf_cstr(&dir), names.items[i])) != CASI_OK)
+            goto done;
+        if ((rc = casi_fs_stat(casi_buf_cstr(&path), &st)) != CASI_OK)
+            goto done;
+        if (!st.is_dir &&
+            (rc = add_aux_file(out, CASI_AUX_MEMORY, session,
+                               casi_buf_cstr(&path), names.items[i])) != CASI_OK)
+            goto done;
+    }
+
+    rc = CASI_OK;
+done:
+    casi_strvec_dispose(&names);
+    casi_buf_dispose(&dir);
+    casi_buf_dispose(&path);
+    return rc;
+}
+
 static int discover_one_project(const casi_roots *roots, const char *projects,
-                                const char *dir_name, casi_session_list *out)
+                                const char *dir_name, casi_session_list *out,
+                                casi_aux_file_list *aux_out)
 {
     casi_buf dir = CASI_BUF_INIT, file = CASI_BUF_INIT;
     casi_buf raw_path = CASI_BUF_INIT, canonical = CASI_BUF_INIT, pid = CASI_BUF_INIT;
     casi_strvec entries = CASI_STRVEC_INIT;
-    size_t i;
+    size_t i, first_session;
     int rc;
 
     if ((rc = casi_fs_join(&dir, projects, dir_name)) != CASI_OK)
         goto done;
     if ((rc = casi_fs_listdir(casi_buf_cstr(&dir), &entries)) != CASI_OK)
         goto done;
+
+    first_session = out->len;
 
     for (i = 0; i < entries.len; i++) {
         casi_session session;
@@ -133,7 +263,16 @@ static int discover_one_project(const casi_roots *roots, const char *projects,
             free(session.project_id);
             goto done;
         }
+        if ((rc = discover_subagents(casi_buf_cstr(&dir), &session, aux_out)) != CASI_OK)
+            goto done;
     }
+
+    /* A Claude project directory has no invertible name. A transcript is the
+     * authoritative source of its path, so memory with no transcript yet is
+     * intentionally left local until Claude has written that first record. */
+    if (out->len > first_session &&
+        (rc = discover_memory(casi_buf_cstr(&dir), &out->items[first_session], aux_out)) != CASI_OK)
+        goto done;
 
     rc = CASI_OK;
 
@@ -147,7 +286,8 @@ done:
     return rc;
 }
 
-static int claude_discover(const casi_roots *roots, casi_session_list *out)
+static int claude_discover(const casi_roots *roots, casi_session_list *out,
+                           casi_aux_file_list *aux_out)
 {
     casi_buf projects = CASI_BUF_INIT;
     casi_strvec dirs = CASI_STRVEC_INIT;
@@ -174,7 +314,7 @@ static int claude_discover(const casi_roots *roots, casi_session_list *out)
         rc = casi_fs_join(&full, casi_buf_cstr(&projects), dirs.items[i]);
         if (rc == CASI_OK && casi_fs_is_dir(casi_buf_cstr(&full)))
             rc = discover_one_project(roots, casi_buf_cstr(&projects),
-                                      dirs.items[i], out);
+                                      dirs.items[i], out, aux_out);
         casi_buf_dispose(&full);
 
         if (rc != CASI_OK)
@@ -187,8 +327,8 @@ done:
     return rc;
 }
 
-static int claude_local_path_for(const casi_roots *roots, const char *project_path,
-                                 const char *session_id, casi_buf *out)
+static int claude_project_dir_for(const casi_roots *roots, const char *project_path,
+                                  casi_buf *out)
 {
     casi_buf projects = CASI_BUF_INIT, local = CASI_BUF_INIT, encoded = CASI_BUF_INIT;
     int rc;
@@ -207,12 +347,7 @@ static int claude_local_path_for(const casi_roots *roots, const char *project_pa
     casi_buf_clear(out);
     if ((rc = casi_buf_puts(out, casi_buf_cstr(&projects))) != CASI_OK)
         goto done;
-    if ((rc = casi_fs_join(out, "", casi_buf_cstr(&encoded))) != CASI_OK)
-        goto done;
-    if ((rc = casi_fs_join(out, "", session_id)) != CASI_OK)
-        goto done;
-
-    rc = casi_buf_puts(out, ".jsonl");
+    rc = casi_fs_join(out, "", casi_buf_cstr(&encoded));
 
 done:
     casi_buf_dispose(&projects);
@@ -221,8 +356,45 @@ done:
     return rc;
 }
 
+static int claude_local_path_for(const casi_roots *roots, const char *project_path,
+                                 const char *session_id, casi_buf *out)
+{
+    int rc;
+
+    if ((rc = claude_project_dir_for(roots, project_path, out)) != CASI_OK)
+        return rc;
+    if ((rc = casi_fs_join(out, "", session_id)) != CASI_OK)
+        return rc;
+    return casi_buf_puts(out, ".jsonl");
+}
+
+static int claude_aux_local_path_for(const casi_roots *roots, casi_aux_kind kind,
+                                     const char *project_path, const char *session_id,
+                                     const char *name, casi_buf *out)
+{
+    int rc;
+
+    if ((rc = claude_project_dir_for(roots, project_path, out)) != CASI_OK)
+        return rc;
+    if (kind == CASI_AUX_SUBAGENT) {
+        if (session_id == NULL)
+            return casi_error_set(CASI_EINVAL, "subagent without a session id");
+        if ((rc = casi_fs_join(out, "", session_id)) != CASI_OK ||
+            (rc = casi_fs_join(out, "", "subagents")) != CASI_OK)
+            return rc;
+    } else if (kind == CASI_AUX_MEMORY) {
+        if ((rc = casi_fs_join(out, "", "memory")) != CASI_OK)
+            return rc;
+    } else {
+        return casi_error_set(CASI_EINVAL, "unknown auxiliary file kind");
+    }
+
+    return casi_fs_join(out, "", name);
+}
+
 const casi_provider casi_provider_claude_code = {
     "claude-code",
     claude_discover,
-    claude_local_path_for
+    claude_local_path_for,
+    claude_aux_local_path_for
 };

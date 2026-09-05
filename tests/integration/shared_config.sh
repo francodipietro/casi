@@ -57,4 +57,13 @@ git -C "$work/remote.git" ls-tree -r --name-only refs/heads/casi/machine-b |
     fail "include on A did not revoke the exclusion for B"
 echo "  ok   include revokes the shared exclusion for every machine"
 
-echo "shared_config: 3 passed"
+# An exclusion applies on pull too: already-published material must not be
+# restored after a machine decides to exclude that project again.
+export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
+"$casi" exclude "$work/a/src/client" >/dev/null || fail "shared exclude on A"
+"$casi" pull >/dev/null || fail "excluded pull on A"
+find "$work/a/.claude/projects" -name 'bbbbbbbb-0000-0000-0000-000000000000.jsonl' |
+    grep -q . && fail "excluded project was materialised by pull"
+echo "  ok   shared exclusion prevents pull materialisation too"
+
+echo "shared_config: 4 passed"

@@ -61,6 +61,18 @@ static void test_phase_one_config_is_accepted(void)
     casi_shared_config_dispose(&cfg);
 }
 
+static void test_parse_does_not_require_a_nul_terminator(void)
+{
+    const char json[] = { '{', '"', 'f', 'o', 'r', 'm', 'a', 't', '"', ':', '1', '}' };
+    casi_shared_config cfg = { 0 };
+
+    ASSERT_OK(casi_shared_config_parse(&cfg, json, sizeof(json)));
+    ASSERT_EQ_INT(cfg.roots.len, 0);
+    ASSERT_EQ_INT(cfg.exclude.len, 0);
+
+    casi_shared_config_dispose(&cfg);
+}
+
 static void test_rejects_bad_shared_values(void)
 {
     casi_shared_config cfg = { 0 };
@@ -84,6 +96,7 @@ int main(void)
     RUN_TEST(test_serialization_is_deterministic);
     RUN_TEST(test_roundtrip_and_revoke);
     RUN_TEST(test_phase_one_config_is_accepted);
+    RUN_TEST(test_parse_does_not_require_a_nul_terminator);
     RUN_TEST(test_rejects_bad_shared_values);
 
     status = casi_test_report("shared_config");

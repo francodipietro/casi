@@ -45,6 +45,7 @@ set(CASI_INTEGRATION_TESTS
     conflict
     shared_config
     doctor
+    auxiliary_files
 )
 foreach(test_name IN LISTS CASI_INTEGRATION_TESTS)
     add_test(NAME ${test_name}

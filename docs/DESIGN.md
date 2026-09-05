@@ -70,7 +70,7 @@ exclude must already exist before a newly configured machine makes its first
 push, and an include must revoke that exclude everywhere. Neither operation is
 correct if every machine keeps an independent copy.
 
-Fase 2 therefore stores the canonical `casi.json` in `refs/heads/casi/config`.
+Phase 2 therefore stores the canonical `casi.json` in `refs/heads/casi/config`.
 It contains the shared root-name namespace and `sync.exclude`; local config
 still maps those names to machine-specific paths. A writer fetches that ref,
 parents a config commit on it, and pushes normally. A non-fast-forward means
@@ -78,10 +78,24 @@ another machine won the race, so casi refetches, replays the small set-like
 mutation, and retries. It never force-pushes configuration and never treats
 that race as a transcript conflict.
 
-The first Fase 2 push migrates a legacy local `sync.exclude` list before it
+The first Phase 2 push migrates a legacy local `sync.exclude` list before it
 scans or uploads sessions. This preserves the safety boundary during upgrade:
 an excluded client project cannot leak in the gap between installing the new
 binary and teaching a second machine about the policy.
+
+## Sidecars and memory are blobs, not transcript chunks
+
+Claude Code's `subagents/` files and project `memory/` are ordinary small text
+files. casi normalises their embedded paths like a transcript, but stores each
+as one blob: they have no append-only contract, so applying the transcript
+prefix rule would be fictional. Their identity is their project, optional
+session, and basename.
+
+An equal blob is already current. A missing one materialises atomically. If a
+local auxiliary file and the remote one differ, casi leaves the local file
+untouched, parks the translated remote copy under `conflicts/`, reports exit 3,
+and never selects either version by timestamp or iteration order. Two distinct
+remote versions likewise report a conflict rather than silently choosing one.
 
 ## The project directory name is never decoded
 
