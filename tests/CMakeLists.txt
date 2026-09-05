@@ -44,6 +44,7 @@ set(CASI_INTEGRATION_TESTS
     two_machines
     conflict
     shared_config
+    doctor
 )
 foreach(test_name IN LISTS CASI_INTEGRATION_TESTS)
     add_test(NAME ${test_name}

@@ -18,9 +18,9 @@
  * Windows port painful.
  *
  * Branch layout: each machine owns refs/heads/casi/<machine> and only ever
- * writes its own. A push can therefore never be rejected as non-fast-forward,
- * so there is no retry loop and no race between machines. A pull reads every
- * every branch under refs/heads/casi/ and takes the union.
+ * writes its own. refs/heads/casi/config is the sole shared branch and its
+ * optimistic update protocol retries a non-fast-forward push. A pull reads
+ * every machine branch under refs/heads/casi/ and takes their union.
  */
 
 typedef struct casi_repo casi_repo;

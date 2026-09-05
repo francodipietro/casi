@@ -105,6 +105,13 @@ int casi_repo_validate_machine_name(const char *machine)
                               "invalid machine name \"%s\": expected one valid Git ref component",
                               machine != NULL ? machine : "");
 
+    /* This ref is the one shared, serially-updated configuration branch, not
+     * a machine-owned session branch. Reserving its final component keeps a
+     * machine label from stealing that namespace. */
+    if (strcmp(machine, "config") == 0)
+        return casi_error_set(CASI_EINVAL,
+                              "invalid machine name \"config\": reserved for shared configuration");
+
     if ((rc = casi_buf_printf(&refname, "refs/heads/casi/%s", machine)) != CASI_OK)
         goto done;
 
