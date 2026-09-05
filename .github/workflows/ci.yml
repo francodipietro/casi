@@ -169,13 +169,18 @@ jobs:
           VENDORED_RESULT: ${{ needs.vendored.result }}
           VALGRIND_RESULT: ${{ needs.valgrind.result }}
         run: |
-          set -eu
-          [ "$CHANGES_RESULT" = success ]
+          set -euo pipefail
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
+
+          [ "$CHANGES_RESULT" = success ] || fail "change classification: $CHANGES_RESULT"
 
           if [ "$FULL" = true ]; then
-            [ "$BUILD_RESULT" = success ]
-            [ "$VENDORED_RESULT" = success ]
-            [ "$VALGRIND_RESULT" = success ]
+            [ "$BUILD_RESULT" = success ] || fail "full build matrix: $BUILD_RESULT"
+            [ "$VENDORED_RESULT" = success ] || fail "vendored SSH build: $VENDORED_RESULT"
+            [ "$VALGRIND_RESULT" = success ] || fail "valgrind: $VALGRIND_RESULT"
           elif [ "$QUICK" = true ]; then
-            [ "$QUICK_RESULT" = success ]
+            [ "$QUICK_RESULT" = success ] || fail "quick build: $QUICK_RESULT"
           fi
