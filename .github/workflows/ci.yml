@@ -5,9 +5,67 @@ on:
     branches: [ main ]
   pull_request:
 
+# A new push to the same PR makes the previous result obsolete. Cancelling it
+# frees runners and means reviewers only wait for the commit they can merge.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.filter.outputs.full }}
+      quick: ${{ steps.filter.outputs.quick }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            # Changes that can affect portability, linking, the core sync
+            # semantics, or CI itself receive the complete test matrix.
+            full:
+              - '.github/**'
+              - 'CMakeLists.txt'
+              - 'CMakePresets.json'
+              - 'cmake/**'
+              - 'include/**'
+              - 'src/core/**'
+            # Other implementation and test changes still get a fast Linux
+            # build. `full` wins when a PR matches both categories.
+            quick:
+              - 'src/**'
+              - 'tests/**'
+
+  quick:
+    name: ubuntu-latest / clang / dev
+    needs: changes
+    if: needs.changes.outputs.full != 'true' && needs.changes.outputs.quick == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libgit2-dev
+      - run: cmake --preset dev
+      - run: cmake --build --preset dev
+      - run: ctest --preset dev
+
   build:
     name: ${{ matrix.os }} / ${{ matrix.cc }} / ${{ matrix.preset }}
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -47,6 +105,8 @@ jobs:
   # exercised too -- it is a different code path in casi_ssh_backend().
   vendored:
     name: vendored libgit2 (exec ssh)
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +123,8 @@ jobs:
 
   valgrind:
     name: valgrind
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,3 +149,32 @@ jobs:
                      --error-exitcode=1 "$t" || status=1
           done
           exit $status
+
+  # This job is deliberately always present. When branch protection becomes
+  # available, require only "CI" rather than conditionally skipped job names.
+  gate:
+    name: CI
+    if: always()
+    needs: [changes, quick, build, vendored, valgrind]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify applicable jobs
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          FULL: ${{ needs.changes.outputs.full }}
+          QUICK: ${{ needs.changes.outputs.quick }}
+          QUICK_RESULT: ${{ needs.quick.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          VENDORED_RESULT: ${{ needs.vendored.result }}
+          VALGRIND_RESULT: ${{ needs.valgrind.result }}
+        run: |
+          set -eu
+          [ "$CHANGES_RESULT" = success ]
+
+          if [ "$FULL" = true ]; then
+            [ "$BUILD_RESULT" = success ]
+            [ "$VENDORED_RESULT" = success ]
+            [ "$VALGRIND_RESULT" = success ]
+          elif [ "$QUICK" = true ]; then
+            [ "$QUICK_RESULT" = success ]
+          fi
