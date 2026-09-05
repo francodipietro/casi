@@ -39,6 +39,7 @@ jobs:
               - 'cmake/**'
               - 'include/**'
               - 'src/core/**'
+              - 'src/util/fs.c'
             # Other implementation and test changes still get a fast Linux
             # build. `full` wins when a PR matches both categories.
             quick:
