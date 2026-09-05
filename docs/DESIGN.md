@@ -62,6 +62,27 @@ is still well-formed JSON. On Unix, paths contain no characters JSON escapes, so
 literal substitution is safe. On Windows they do (`"C:\\Users\\..."`), which is
 why the substituter is written to take the escaped variant as well.
 
+## Shared configuration has one authoritative ref
+
+Machine branches are intentionally independently owned: that is what keeps a
+session push free of non-fast-forward races. Configuration is different. An
+exclude must already exist before a newly configured machine makes its first
+push, and an include must revoke that exclude everywhere. Neither operation is
+correct if every machine keeps an independent copy.
+
+Fase 2 therefore stores the canonical `casi.json` in `refs/heads/casi/config`.
+It contains the shared root-name namespace and `sync.exclude`; local config
+still maps those names to machine-specific paths. A writer fetches that ref,
+parents a config commit on it, and pushes normally. A non-fast-forward means
+another machine won the race, so casi refetches, replays the small set-like
+mutation, and retries. It never force-pushes configuration and never treats
+that race as a transcript conflict.
+
+The first Fase 2 push migrates a legacy local `sync.exclude` list before it
+scans or uploads sessions. This preserves the safety boundary during upgrade:
+an excluded client project cannot leak in the gap between installing the new
+binary and teaching a second machine about the policy.
+
 ## The project directory name is never decoded
 
 Claude Code derives `~/.claude/projects/<name>` from the startup working

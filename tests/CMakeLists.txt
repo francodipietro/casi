@@ -7,6 +7,7 @@ set(CASI_UNIT_TESTS
     test_paths
     test_config
     test_jsonl
+    test_shared_config
     test_encoding
     test_roots
     test_chunk
@@ -42,6 +43,7 @@ add_test(NAME cli_errors
 set(CASI_INTEGRATION_TESTS
     two_machines
     conflict
+    shared_config
 )
 foreach(test_name IN LISTS CASI_INTEGRATION_TESTS)
     add_test(NAME ${test_name}

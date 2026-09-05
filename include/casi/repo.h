@@ -62,6 +62,13 @@ int casi_repo_commit(casi_repo *repo, const char *refname, const git_oid *tree,
  * which is the ordinary state before the first push. */
 int casi_repo_ref_tree(casi_repo *repo, const char *refname, git_oid *out);
 
+/* Makes `refname` point at `source_refname` when the latter exists. Used by
+ * the shared configuration transaction to parent its next commit on the
+ * freshly fetched authoritative state. A missing source is ordinary before
+ * the first configuration push. */
+int casi_repo_reset_ref_from(casi_repo *repo, const char *refname,
+                             const char *source_refname);
+
 /* Object id of a tree entry addressed by path. */
 int casi_repo_tree_entry_oid(casi_repo *repo, const git_oid *tree,
                              const char *path, git_oid *out);

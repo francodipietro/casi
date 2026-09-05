@@ -27,6 +27,11 @@ int casi_cmd_push(int argc, char **argv)
     if ((rc = casi_ctx_open(&ctx)) != CASI_OK)
         return rc;
 
+    /* Publish/migrate config before scanning. In particular, a legacy local
+     * exclusion reaches the remote before this command can upload sessions. */
+    if (!dry_run && (rc = casi_ctx_publish_shared_config(&ctx)) != CASI_OK)
+        goto done;
+
     if ((rc = casi_ops_scan_local(&ctx, &local, &excluded)) != CASI_OK)
         goto done;
 

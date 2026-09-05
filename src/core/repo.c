@@ -246,6 +246,35 @@ int casi_repo_ref_tree(casi_repo *repo, const char *refname, git_oid *out)
     return CASI_OK;
 }
 
+int casi_repo_reset_ref_from(casi_repo *repo, const char *refname,
+                             const char *source_refname)
+{
+    git_reference *source = NULL, *updated = NULL;
+    const git_oid *target;
+    int err;
+
+    err = git_reference_lookup(&source, repo->git, source_refname);
+    if (err == GIT_ENOTFOUND)
+        return CASI_OK;
+    if (err != 0)
+        return casi_error_set_git(CASI_ERROR, "cannot read %s", source_refname);
+
+    target = git_reference_target(source);
+    if (target == NULL) {
+        git_reference_free(source);
+        return casi_error_set(CASI_ERROR, "%s is not a direct ref", source_refname);
+    }
+    if (git_reference_create(&updated, repo->git, refname, target, 1,
+                             "casi: refresh shared config base") != 0) {
+        git_reference_free(source);
+        return casi_error_set_git(CASI_ERROR, "cannot refresh %s", refname);
+    }
+
+    git_reference_free(updated);
+    git_reference_free(source);
+    return CASI_OK;
+}
+
 int casi_repo_commit(casi_repo *repo, const char *refname, const git_oid *tree_oid,
                      const char *machine, const char *message, git_oid *out)
 {
@@ -650,8 +679,15 @@ int casi_repo_push(casi_repo *repo, const char *refname)
     git_push_options_init(&opts, GIT_PUSH_OPTIONS_VERSION);
     init_callbacks(&opts.callbacks, &auth);
 
-    if (git_remote_push(remote, &refspecs, &opts) != 0)
-        rc = transport_error("cannot push to the remote");
+    {
+        int err = git_remote_push(remote, &refspecs, &opts);
+
+        if (err == GIT_ENONFASTFORWARD)
+            rc = casi_error_set(CASI_ERETRY,
+                                "remote advanced while updating %s", refname);
+        else if (err != 0)
+            rc = transport_error("cannot push to the remote");
+    }
 
 out:
     casi_buf_dispose(&spec);
@@ -673,7 +709,8 @@ int casi_repo_list_machines(casi_repo *repo, casi_strvec *out)
     while (git_reference_next(&ref, iter) == 0) {
         const char *name = git_reference_name(ref);
 
-        if (casi_str_has_prefix(name, prefix))
+        if (casi_str_has_prefix(name, prefix) &&
+            strcmp(name + sizeof(prefix) - 1, "config") != 0)
             rc = casi_strvec_push(out, name + sizeof(prefix) - 1);
 
         git_reference_free(ref);

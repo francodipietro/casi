@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 #include "cmd/cmd.h"
 #include "casi/ctx.h"
+#include "casi/shared_config.h"
 
 #include <string.h>
 
@@ -41,25 +42,60 @@ static int run(int argc, char **argv, bool excluding)
     if ((rc = canonical_of(&ctx, argv[0], &canonical)) != CASI_OK)
         goto done;
 
-    if (excluding) {
-        rc = casi_config_add_multivar(ctx.cfg, "sync.exclude",
-                                      casi_buf_cstr(&canonical));
-        if (rc == CASI_OK)
-            casi_info("excluded %s -- its sessions will not be pushed",
-                      casi_buf_cstr(&canonical));
-    } else {
-        rc = casi_config_remove_multivar(ctx.cfg, "sync.exclude",
-                                         casi_buf_cstr(&canonical));
-        if (rc == CASI_ENOTFOUND) {
+    {
+        unsigned int attempt;
+
+        rc = CASI_ERETRY;
+        for (attempt = 0; attempt < 3; attempt++) {
+            casi_shared_config shared = { 0 };
+            bool present;
+
+            if ((rc = casi_repo_fetch(ctx.repo)) != CASI_OK)
+                goto update_done;
+            if ((rc = casi_shared_config_load_remote(ctx.repo, &shared, &present)) != CASI_OK)
+                goto update_done;
+
+            /* Upgrade local-only exclusions as one atomic first shared write.
+             * Once the ref exists, remote state is authoritative. */
+            if (!present) {
+                casi_strvec legacy = CASI_STRVEC_INIT;
+                size_t i;
+
+                rc = casi_config_get_multivar(ctx.cfg, "sync.exclude", &legacy);
+                for (i = 0; rc == CASI_OK && i < legacy.len; i++)
+                    rc = casi_shared_config_add_exclude(&shared, legacy.items[i]);
+                casi_strvec_dispose(&legacy);
+                if (rc != CASI_OK)
+                    goto update_done;
+            }
+
+            rc = excluding
+                 ? casi_shared_config_add_exclude(&shared, casi_buf_cstr(&canonical))
+                 : casi_shared_config_remove_exclude(&shared, casi_buf_cstr(&canonical));
+            if (rc == CASI_ENOTFOUND && !excluding) {
+                casi_error_clear();
+                rc = CASI_OK;
+            }
+            if (rc == CASI_OK)
+                rc = casi_shared_config_commit_push(ctx.repo, &shared, ctx.machine);
+
+update_done:
+            casi_shared_config_dispose(&shared);
+            if (rc != CASI_ERETRY)
+                break;
             casi_error_clear();
-            casi_info("%s was not excluded; nothing to do",
-                      casi_buf_cstr(&canonical));
-            rc = CASI_OK;
-        } else if (rc == CASI_OK) {
-            casi_info("included %s -- its sessions will be pushed again",
-                      casi_buf_cstr(&canonical));
         }
+        if (rc == CASI_ERETRY)
+            rc = casi_error_set(CASI_ERROR,
+                                "shared configuration changed concurrently; try again");
     }
+
+    if (rc == CASI_OK && excluding)
+        casi_info("excluded %s -- its sessions will not be pushed on any machine",
+                  casi_buf_cstr(&canonical));
+    else if (rc == CASI_OK)
+        casi_info("included %s -- its sessions may be pushed again on every machine",
+                  casi_buf_cstr(&canonical));
 
 done:
     casi_buf_dispose(&canonical);

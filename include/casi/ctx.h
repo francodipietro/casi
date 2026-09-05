@@ -26,4 +26,9 @@ int casi_ctx_local_ref(const casi_ctx *ctx, casi_buf *out);
 /* The excluded canonical project paths, from sync.exclude. */
 int casi_ctx_exclude_list(const casi_ctx *ctx, casi_strvec *out);
 
+/* Fetches and publishes the authoritative shared config before a push. On a
+ * legacy remote with no config ref yet, local sync.exclude is migrated first
+ * so no existing exclusion is bypassed during the transition. */
+int casi_ctx_publish_shared_config(casi_ctx *ctx);
+
 #endif /* CASI_CTX_H */
