@@ -28,7 +28,7 @@ int casi_ops_scan_local(casi_ctx *ctx, casi_entry_list *out, size_t *excluded_ou
 int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out);
 
 /* Compares the two sides without changing anything. */
-void casi_ops_summarise(casi_entry_list *local, casi_entry_list *remote,
-                        casi_sync_summary *out);
+int casi_ops_summarise(casi_repo *repo, casi_entry_list *local,
+                       casi_entry_list *remote, casi_sync_summary *out);
 
 #endif /* CASI_SYNC_OPS_H */

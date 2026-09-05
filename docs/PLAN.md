@@ -5,10 +5,10 @@ verbatim below. It is the source of the *why* behind most of the non-obvious
 decisions in this codebase: the JSONL format investigation, the chunking
 rationale, the prefix conflict rule, the phase breakdown.
 
-**Read [HANDOFF.md](../HANDOFF.md) first.** It says what has actually been
-built since this was written, what has changed from the plan below, and what
-is still open. This document is the historical record; HANDOFF.md is the
-current state.
+**Read [HANDOFF.md](../HANDOFF.md) first.** It records what was actually built
+and what was empirically verified during the Phase 1 handoff. Phase 1 has since
+merged, so its branch snapshot and pre-PR checklist are historical; consult
+the current git state alongside the durable docs for subsequent work.
 
 Known supersessions (see HANDOFF.md for detail):
 
@@ -26,9 +26,9 @@ Known supersessions (see HANDOFF.md for detail):
   once written (e.g. `core/ctx.c` for the "everything a command needs, opened
   once" context, `util/jsonl.c` for the line-scanning helpers). The actual
   tree is in HANDOFF.md and is authoritative.
-- §8's integration test list (`large_session`, `roundtrip`, `ssh_remote`) is
-  the target, not what exists. HANDOFF.md says which of these are still
-  missing.
+- §8's integration test list remains the target. `roundtrip` is now covered
+  by `two_machines`; `large_session` and an autonomous `ssh_remote` CI job
+  are still missing.
 
 Everything else below reflects what was actually built.
 

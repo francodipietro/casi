@@ -90,7 +90,7 @@ library into your prefix. Take `build/static/casi` directly, or install from
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Scaffolding: build, CI, util layer, `casi --version` | done |
-| 1 | MVP: `init`/`status`/`push`/`pull`/`sync` against any git remote | next |
+| 1 | MVP: `init`/`status`/`push`/`pull`/`sync` against any git remote | done |
 | 2 | Named roots, full path normalization, per-project memory | |
 | 3 | Stat-cache, conflict parking, `--dry-run`, `--porcelain` | |
 | 4 | Opt-in encryption (libsodium, convergent per chunk) | |

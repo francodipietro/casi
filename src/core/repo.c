@@ -2,6 +2,7 @@
 #include "casi/repo.h"
 #include "casi/casi.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,15 @@ struct casi_repo {
 struct casi_tree {
     casi_repo *repo;
     git_index *index;
+};
+
+/* libssh2 does not read ssh_config, so credential selection is ours. Keep
+ * per-connection state: a rejected credential must not be offered forever. */
+struct ssh_auth {
+    size_t next_default_key;
+    bool agent_attempted;
+    casi_buf private_key;
+    casi_buf public_key;
 };
 
 /* --- open / init ------------------------------------------------------ */
@@ -406,6 +416,64 @@ int casi_repo_remote_url(casi_repo *repo, casi_buf *out)
     return rc;
 }
 
+static void ssh_auth_dispose(struct ssh_auth *auth)
+{
+    casi_buf_dispose(&auth->private_key);
+    casi_buf_dispose(&auth->public_key);
+}
+
+/* Try OpenSSH's conventional local key locations before the agent. This is
+ * not ssh_config parsing (libssh2 cannot honour aliases or Match rules), but
+ * it covers the normal `ssh-keygen` setup on a plain hostname. A key that the
+ * server rejects advances to the next one rather than looping forever. */
+static int default_key_credential(git_credential **out, const char *username,
+                                  struct ssh_auth *auth)
+{
+    static const char *const names[] = { "id_ed25519", "id_ecdsa", "id_rsa" };
+    const char *home = casi_fs_home();
+
+    if (home == NULL)
+        return GIT_ENOTFOUND;
+
+    while (auth->next_default_key < sizeof(names) / sizeof(names[0])) {
+        const char *name = names[auth->next_default_key++];
+        casi_stat st;
+        int rc;
+
+        casi_buf_clear(&auth->private_key);
+        casi_buf_clear(&auth->public_key);
+        if ((rc = casi_buf_printf(&auth->private_key, "%s/.ssh/%s", home, name)) != CASI_OK ||
+            (rc = casi_buf_printf(&auth->public_key, "%s/.ssh/%s.pub", home, name)) != CASI_OK)
+            return GIT_ERROR;
+
+        rc = casi_fs_stat(casi_buf_cstr(&auth->private_key), &st);
+        if (rc == CASI_ENOTFOUND) {
+            casi_error_clear();
+            continue;
+        }
+        if (rc != CASI_OK)
+            return GIT_ERROR;
+        if (st.is_dir)
+            continue;
+
+        rc = casi_fs_stat(casi_buf_cstr(&auth->public_key), &st);
+        if (rc == CASI_ENOTFOUND) {
+            casi_error_clear();
+            continue;
+        }
+        if (rc != CASI_OK)
+            return GIT_ERROR;
+        if (st.is_dir)
+            continue;
+
+        return git_credential_ssh_key_new(out, username,
+                                          casi_buf_cstr(&auth->public_key),
+                                          casi_buf_cstr(&auth->private_key), NULL);
+    }
+
+    return GIT_ENOTFOUND;
+}
+
 /*
  * Credentials. The exec SSH backend never reaches here -- it hands the
  * connection to the system ssh, which uses the user's agent and config as
@@ -416,12 +484,28 @@ static int credential_cb(git_credential **out, const char *url,
                          const char *username_from_url,
                          unsigned int allowed_types, void *payload)
 {
-    (void)url;
-    (void)payload;
+    struct ssh_auth *auth = payload;
+    const char *username = username_from_url != NULL ? username_from_url : "git";
+    int rc;
 
-    if (allowed_types & GIT_CREDENTIAL_SSH_KEY)
-        return git_credential_ssh_key_from_agent(
-            out, username_from_url != NULL ? username_from_url : "git");
+    (void)url;
+
+    if (allowed_types & GIT_CREDENTIAL_SSH_KEY) {
+        rc = default_key_credential(out, username, auth);
+        if (rc == 0)
+            return 0;
+        if (rc != GIT_ENOTFOUND)
+            return rc;
+
+        if (!auth->agent_attempted) {
+            auth->agent_attempted = true;
+            rc = git_credential_ssh_key_from_agent(out, username);
+            if (rc == 0)
+                return 0;
+        }
+
+        return GIT_EAUTH;
+    }
 
     if (allowed_types & GIT_CREDENTIAL_DEFAULT)
         return git_credential_default_new(out);
@@ -499,11 +583,12 @@ static int certificate_cb(git_cert *cert, int valid, const char *host, void *pay
     return valid ? 0 : GIT_ECERTIFICATE;
 }
 
-static void init_callbacks(git_remote_callbacks *cb)
+static void init_callbacks(git_remote_callbacks *cb, struct ssh_auth *auth)
 {
     git_remote_init_callbacks(cb, GIT_REMOTE_CALLBACKS_VERSION);
     cb->credentials = credential_cb;
     cb->certificate_check = certificate_cb;
+    cb->payload = auth;
 }
 
 /* Turns a libgit2 transport failure into casi's network/auth code, so the
@@ -517,6 +602,7 @@ int casi_repo_fetch(casi_repo *repo)
 {
     git_remote *remote = NULL;
     git_fetch_options opts;
+    struct ssh_auth auth = { 0 };
     char *spec = (char *)CASI_REFSPEC_FETCH;
     git_strarray refspecs = { &spec, 1 };
     int rc = CASI_OK;
@@ -526,7 +612,7 @@ int casi_repo_fetch(casi_repo *repo)
                               "no remote configured -- run `casi init --remote <url>`");
 
     git_fetch_options_init(&opts, GIT_FETCH_OPTIONS_VERSION);
-    init_callbacks(&opts.callbacks);
+    init_callbacks(&opts.callbacks, &auth);
     /* Nothing here is a working tree, so there are no tags worth chasing. */
     opts.download_tags = GIT_REMOTE_DOWNLOAD_TAGS_NONE;
     /* Drop remote-tracking refs for branches that vanished upstream. */
@@ -536,6 +622,7 @@ int casi_repo_fetch(casi_repo *repo)
         rc = transport_error("cannot fetch from the remote");
 
     git_remote_free(remote);
+    ssh_auth_dispose(&auth);
     return rc;
 }
 
@@ -543,6 +630,7 @@ int casi_repo_push(casi_repo *repo, const char *refname)
 {
     git_remote *remote = NULL;
     git_push_options opts;
+    struct ssh_auth auth = { 0 };
     casi_buf spec = CASI_BUF_INIT;
     char *specs[1];
     git_strarray refspecs = { specs, 1 };
@@ -560,7 +648,7 @@ int casi_repo_push(casi_repo *repo, const char *refname)
     specs[0] = spec.ptr;
 
     git_push_options_init(&opts, GIT_PUSH_OPTIONS_VERSION);
-    init_callbacks(&opts.callbacks);
+    init_callbacks(&opts.callbacks, &auth);
 
     if (git_remote_push(remote, &refspecs, &opts) != 0)
         rc = transport_error("cannot push to the remote");
@@ -568,6 +656,7 @@ int casi_repo_push(casi_repo *repo, const char *refname)
 out:
     casi_buf_dispose(&spec);
     git_remote_free(remote);
+    ssh_auth_dispose(&auth);
     return rc;
 }
 

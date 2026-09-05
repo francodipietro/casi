@@ -109,7 +109,11 @@ int casi_cmd_pull(int argc, char **argv)
         casi_entry *l = casi_entry_list_find(&local, r->session_id);
         casi_sync_relation relation;
 
-        relation = (l == NULL) ? CASI_SYNC_REMOTE_AHEAD : casi_sync_compare(l, r);
+        if (l == NULL) {
+            relation = CASI_SYNC_REMOTE_AHEAD;
+        } else if ((rc = casi_sync_compare(ctx.repo, l, r, &relation)) != CASI_OK) {
+            goto done;
+        }
 
         if (relation == CASI_SYNC_SAME || relation == CASI_SYNC_LOCAL_AHEAD)
             continue;

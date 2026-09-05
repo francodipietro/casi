@@ -58,8 +58,18 @@ grep -q "$work/b/code/myproj/main.c" "$got" || fail "embedded path was not trans
 grep -q "$work/a/src" "$got" && fail "machine A's path leaked into B's copy"
 echo "  ok   pull into B: layout re-encoded, cwd and embedded paths translated"
 
-# --- incremental: appending on A must not resend the whole transcript ----
+# --- round-trip: B can continue A's session and A must accept that append ---
+printf '{"type":"assistant","cwd":"%s","message":"continued on B"}\n' \
+    "$work/b/code/myproj" >> "$got"
+"$casi" push >/dev/null || fail "push from B"
+
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
+"$casi" pull >/dev/null || fail "pull continued session into A"
+grep -q 'continued on B' "$sess" || fail "A did not receive B's append"
+grep -q "\"cwd\":\"$work/a/src/myproj\"" "$sess" || fail "B's cwd leaked into A"
+echo "  ok   round-trip B -> A accepts an append within the tail chunk"
+
+# --- incremental: appending on A must not resend the whole transcript ----
 before=$(git -C "$work/remote.git" count-objects -v | awk '/^size-pack:/{print $2}')
 printf '{"type":"user","cwd":"%s","message":"one more line"}\n' \
     "$work/a/src/myproj" >> "$sess"
@@ -74,4 +84,4 @@ after_ref=$(git -C "$work/remote.git" rev-parse refs/heads/casi/machine-a)
 [ "$before_ref" = "$after_ref" ] || fail "push with no changes still moved the ref"
 echo "  ok   push with no changes is a no-op"
 
-echo "two_machines: 5 passed"
+echo "two_machines: 6 passed"

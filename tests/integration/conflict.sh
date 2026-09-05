@@ -41,6 +41,12 @@ export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude
 printf '{"type":"user","cwd":"%s","message":"edited on B, differently"}\n' "$work/b/src/p" >> "$sess_b"
 before_b=$(cat "$sess_b")
 
+# status deliberately works from the last fetch. Refresh B's tracking refs
+# without materialising A's edit, so the comparison below sees the genuine
+# A-versus-B divergence rather than the common base B pulled earlier.
+git -C "$work/b/casi/repo.git" fetch -q origin \
+    '+refs/heads/casi/*:refs/remotes/origin/casi/*'
+
 # status also exits 3 when a conflict is pending -- that is the outcome under
 # test, so errexit has to step aside for exactly this call or the script would
 # die right here on the assignment, before any check runs.

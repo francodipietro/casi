@@ -96,8 +96,10 @@ libgit2 can be built with one of two SSH transports, chosen at compile time:
 casi therefore prefers `exec`, and release binaries vendor libgit2 built that
 way (`--preset static`). Distribution packages that link a system libgit2 may
 well get `libssh2` instead — Homebrew's build does — so `casi --version` and
-`casi doctor` report the backend in play, and the SSH credential and host-key
-callbacks exist to make the `libssh2` case work for plain hostnames.
+`casi doctor` report the backend in play. For a plain hostname, the libssh2
+callbacks verify `known_hosts` and try the conventional local key files
+(`id_ed25519`, `id_ecdsa`, `id_rsa`) before the SSH agent; they never prompt
+for or store a passphrase.
 
 ### Version floor
 
