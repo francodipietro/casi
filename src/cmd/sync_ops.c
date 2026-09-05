@@ -43,11 +43,20 @@ static int merge_assets(casi_asset_list *into, casi_asset_list *from)
          * different remote versions arbitrarily: pull will keep the local
          * file and report the conflict explicitly instead. */
         if (!git_oid_equal(&have->oid, &incoming->oid)) {
-            casi_warn("auxiliary file has conflicting remote versions: %s",
-                      incoming->name);
+            if (incoming->session_id != NULL) {
+                casi_warn("auxiliary file has conflicting remote versions: project %s, "
+                          "session %s, subagent %s", incoming->project_path,
+                          incoming->session_id, incoming->name);
+                return casi_error_set(CASI_ECONFLICT,
+                                      "subagent %s in project %s session %s has conflicting remote versions",
+                                      incoming->name, incoming->project_path,
+                                      incoming->session_id);
+            }
+            casi_warn("auxiliary file has conflicting remote versions: project %s, "
+                      "project memory %s", incoming->project_path, incoming->name);
             return casi_error_set(CASI_ECONFLICT,
-                                  "auxiliary file %s has conflicting remote versions",
-                                  incoming->name);
+                                  "project memory %s in project %s has conflicting remote versions",
+                                  incoming->name, incoming->project_path);
         }
     }
 

@@ -88,6 +88,8 @@ set -e
 [ "$rc" = 3 ] || fail "auxiliary conflict: exit $rc, want 3"
 echo "$out" | grep -q 'auxiliary file differs and was left untouched' ||
     fail "auxiliary conflict: missing warning"
+echo "$out" | grep -Fq 'project casi://src/proj, project memory MEMORY.md' ||
+    fail "auxiliary conflict: warning does not identify the project scope"
 grep -q '# Notes' "$base_a/memory/MEMORY.md" ||
     fail "auxiliary conflict: local memory was overwritten"
 find "$work/a/casi/conflicts" -type f | grep -q 'aux-.*MEMORY.md-remote' ||

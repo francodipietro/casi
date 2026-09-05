@@ -90,6 +90,18 @@ static int asset_conflict_path(const casi_asset *asset, casi_buf *path)
     }
 }
 
+static void report_asset_conflict(const casi_asset *asset)
+{
+    if (asset->session_id != NULL) {
+        casi_warn("auxiliary file differs and was left untouched: project %s, "
+                  "session %s, subagent %s",
+                  asset->project_path, asset->session_id, asset->name);
+    } else {
+        casi_warn("auxiliary file differs and was left untouched: project %s, "
+                  "project memory %s", asset->project_path, asset->name);
+    }
+}
+
 static int park_conflict(casi_ctx *ctx, const casi_entry *entry, const char *side)
 {
     casi_buf path = CASI_BUF_INIT, unmapped = CASI_BUF_INIT;
@@ -218,7 +230,7 @@ int casi_cmd_pull(int argc, char **argv)
         if (local_asset != NULL && git_oid_equal(&local_asset->oid, &remote_asset->oid))
             continue;
         if (local_asset != NULL) {
-            casi_warn("auxiliary file differs and was left untouched: %s", remote_asset->name);
+            report_asset_conflict(remote_asset);
             if (!dry_run) {
                 if ((rc = asset_conflict_path(remote_asset, &parked)) != CASI_OK)
                     goto done;
