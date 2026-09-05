@@ -91,10 +91,10 @@ update_done:
     }
 
     if (rc == CASI_OK && excluding)
-        casi_info("excluded %s -- its sessions will not be pushed on any machine",
+        casi_info("%s is excluded -- its sessions will not be pushed on any machine",
                   casi_buf_cstr(&canonical));
     else if (rc == CASI_OK)
-        casi_info("included %s -- its sessions may be pushed again on every machine",
+        casi_info("%s is included -- its sessions may be pushed again on every machine",
                   casi_buf_cstr(&canonical));
 
 done:

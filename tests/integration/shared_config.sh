@@ -48,7 +48,14 @@ echo "  ok   a new machine inherits exclusions before its first session push"
 # A revokes the exclusion. B's next push must observe that exact remote state
 # and publish the session without manual configuration on B.
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
-"$casi" include "$work/a/src/client" >/dev/null || fail "shared include on A"
+out=$("$casi" include "$work/a/src/client") || fail "shared include on A"
+echo "$out" | grep -Fq 'casi://src/client is included' ||
+    fail "include does not report the resulting state"
+# A second include is intentionally a no-op, but it should use the same
+# state-based wording rather than claiming it made a change.
+out=$("$casi" include "$work/a/src/client") || fail "idempotent shared include on A"
+echo "$out" | grep -Fq 'casi://src/client is included' ||
+    fail "idempotent include does not report the resulting state"
 
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" push >/dev/null || fail "included push from B"
@@ -60,7 +67,9 @@ echo "  ok   include revokes the shared exclusion for every machine"
 # An exclusion applies on pull too: already-published material must not be
 # restored after a machine decides to exclude that project again.
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
-"$casi" exclude "$work/a/src/client" >/dev/null || fail "shared exclude on A"
+out=$("$casi" exclude "$work/a/src/client") || fail "shared exclude on A"
+echo "$out" | grep -Fq 'casi://src/client is excluded' ||
+    fail "exclude does not report the resulting state"
 "$casi" pull >/dev/null || fail "excluded pull on A"
 find "$work/a/.claude/projects" -name 'bbbbbbbb-0000-0000-0000-000000000000.jsonl' |
     grep -q . && fail "excluded project was materialised by pull"
