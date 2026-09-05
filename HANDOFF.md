@@ -8,6 +8,12 @@ facts a fresh agent should not re-derive or assume — several of these were
 only established by live experimentation, not by reading documentation that
 doesn't exist.
 
+> **Historical snapshot.** Phase 1 was subsequently squash-merged as PR #2
+> (`a3f0e41`). Its branch state in §2 and the pre-PR checklist in §7 are no
+> longer current instructions. Keep this file for the empirical evidence and
+> rationale it records; use the durable docs plus the current git state when
+> starting later work.
+
 Read this whole file before touching git or writing code. Section 2 in
 particular describes a real risk to the actual work product.
 
