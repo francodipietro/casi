@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 #include "casi/ctx.h"
 #include "casi/casi.h"
+#include "casi/shared_config.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -76,5 +77,81 @@ int casi_ctx_local_ref(const casi_ctx *ctx, casi_buf *out)
 
 int casi_ctx_exclude_list(const casi_ctx *ctx, casi_strvec *out)
 {
-    return casi_config_get_multivar(ctx->cfg, "sync.exclude", out);
+    casi_shared_config shared = { 0 };
+    bool present;
+    size_t i;
+    int rc;
+
+    if ((rc = casi_shared_config_load_remote(ctx->repo, &shared, &present)) != CASI_OK)
+        goto done;
+
+    if (!present) {
+        rc = casi_config_get_multivar(ctx->cfg, "sync.exclude", out);
+        goto done;
+    }
+
+    casi_strvec_dispose(out);
+    for (i = 0; i < shared.exclude.len; i++)
+        if ((rc = casi_strvec_push(out, shared.exclude.items[i])) != CASI_OK)
+            goto done;
+    rc = CASI_OK;
+
+done:
+    casi_shared_config_dispose(&shared);
+    return rc;
+}
+
+static int add_local_root_names(casi_ctx *ctx, casi_shared_config *shared)
+{
+    size_t i;
+    int rc;
+
+    for (i = 0; i < casi_roots_count(ctx->roots); i++) {
+        const char *name = casi_roots_name_at(ctx->roots, i);
+
+        if (strcmp(name, CASI_HOME_ROOT) != 0 &&
+            (rc = casi_shared_config_add_root(shared, name)) != CASI_OK)
+            return rc;
+    }
+    return CASI_OK;
+}
+
+int casi_ctx_publish_shared_config(casi_ctx *ctx)
+{
+    unsigned int attempt;
+    int rc = CASI_ERETRY;
+
+    for (attempt = 0; attempt < 3; attempt++) {
+        casi_shared_config shared = { 0 };
+        casi_strvec legacy = CASI_STRVEC_INIT;
+        bool present;
+        size_t i;
+
+        if ((rc = casi_repo_fetch(ctx->repo)) != CASI_OK)
+            goto done;
+        if ((rc = casi_shared_config_load_remote(ctx->repo, &shared, &present)) != CASI_OK)
+            goto done;
+
+        /* The old local-only list must be brought across before the first
+         * session push; otherwise upgrading would expose an excluded project. */
+        if (!present &&
+            (rc = casi_config_get_multivar(ctx->cfg, "sync.exclude", &legacy)) != CASI_OK)
+            goto done;
+        for (i = 0; rc == CASI_OK && i < legacy.len; i++)
+            rc = casi_shared_config_add_exclude(&shared, legacy.items[i]);
+        if (rc == CASI_OK)
+            rc = add_local_root_names(ctx, &shared);
+        if (rc == CASI_OK)
+            rc = casi_shared_config_commit_push(ctx->repo, &shared, ctx->machine);
+
+done:
+        casi_strvec_dispose(&legacy);
+        casi_shared_config_dispose(&shared);
+        if (rc != CASI_ERETRY)
+            return rc;
+        casi_error_clear();
+    }
+
+    return casi_error_set(CASI_ERROR,
+                          "shared configuration changed concurrently; try again");
 }

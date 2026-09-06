@@ -18,9 +18,9 @@
  * Windows port painful.
  *
  * Branch layout: each machine owns refs/heads/casi/<machine> and only ever
- * writes its own. A push can therefore never be rejected as non-fast-forward,
- * so there is no retry loop and no race between machines. A pull reads every
- * every branch under refs/heads/casi/ and takes the union.
+ * writes its own. refs/heads/casi/config is the sole shared branch and its
+ * optimistic update protocol retries a non-fast-forward push. A pull reads
+ * every machine branch under refs/heads/casi/ and takes their union.
  */
 
 typedef struct casi_repo casi_repo;
@@ -39,6 +39,7 @@ int casi_repo_validate_machine_name(const char *machine);
 
 int casi_repo_write_blob(casi_repo *repo, const void *data, size_t len, git_oid *out);
 int casi_repo_read_blob(casi_repo *repo, const git_oid *oid, casi_buf *out);
+int casi_repo_blob_size(casi_repo *repo, const git_oid *oid, uint64_t *out);
 int casi_repo_has_object(casi_repo *repo, const git_oid *oid);
 
 /*
@@ -61,6 +62,13 @@ int casi_repo_commit(casi_repo *repo, const char *refname, const git_oid *tree,
 /* Tree a ref currently points at. CASI_ENOTFOUND when the ref does not exist,
  * which is the ordinary state before the first push. */
 int casi_repo_ref_tree(casi_repo *repo, const char *refname, git_oid *out);
+
+/* Makes `refname` point at `source_refname` when the latter exists. Used by
+ * the shared configuration transaction to parent its next commit on the
+ * freshly fetched authoritative state. A missing source is ordinary before
+ * the first configuration push. */
+int casi_repo_reset_ref_from(casi_repo *repo, const char *refname,
+                             const char *source_refname);
 
 /* Object id of a tree entry addressed by path. */
 int casi_repo_tree_entry_oid(casi_repo *repo, const git_oid *tree,

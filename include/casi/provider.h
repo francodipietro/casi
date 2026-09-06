@@ -31,17 +31,49 @@ typedef struct {
 void casi_session_list_dispose(casi_session_list *list);
 int  casi_session_list_push(casi_session_list *list, const casi_session *session);
 
+/* A small, non-transcript file owned either by a session or by a project.
+ * Its content still travels through the root normaliser, but it is a blob --
+ * unlike transcripts it does not participate in the append-prefix rule. */
+typedef enum {
+    CASI_AUX_SUBAGENT,
+    CASI_AUX_MEMORY
+} casi_aux_kind;
+
+typedef struct {
+    casi_aux_kind kind;
+    char         *local_path;    /* source path on this machine              */
+    char         *project_path;  /* canonical                                 */
+    char         *project_id;
+    char         *session_id;    /* set for CASI_AUX_SUBAGENT only            */
+    char         *name;          /* basename below subagents/ or memory/      */
+} casi_aux_file;
+
+typedef struct {
+    casi_aux_file *items;
+    size_t         len;
+    size_t         cap;
+} casi_aux_file_list;
+
+void casi_aux_file_list_dispose(casi_aux_file_list *list);
+int  casi_aux_file_list_push(casi_aux_file_list *list, const casi_aux_file *file);
+
 typedef struct casi_provider {
     const char *name;
 
     /* Enumerates every session this machine holds, with paths already
      * normalised through `roots`. */
-    int (*discover)(const casi_roots *roots, casi_session_list *out);
+    int (*discover)(const casi_roots *roots, casi_session_list *sessions,
+                    casi_aux_file_list *aux_files);
 
     /* Absolute local path where a session with this canonical project path
      * and id belongs on this machine. */
     int (*local_path_for)(const casi_roots *roots, const char *project_path,
                           const char *session_id, casi_buf *out);
+
+    /* Absolute local destination for an auxiliary file read from the remote. */
+    int (*aux_local_path_for)(const casi_roots *roots, casi_aux_kind kind,
+                              const char *project_path, const char *session_id,
+                              const char *name, casi_buf *out);
 } casi_provider;
 
 const casi_provider *casi_provider_default(void);

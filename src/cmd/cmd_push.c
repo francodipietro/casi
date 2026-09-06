@@ -8,6 +8,7 @@ int casi_cmd_push(int argc, char **argv)
 {
     casi_ctx ctx;
     casi_entry_list local;
+    casi_asset_list local_assets;
     casi_buf refname = CASI_BUF_INIT, message = CASI_BUF_INIT;
     git_oid tree, existing_tree, commit;
     bool dry_run = false, unchanged = false;
@@ -15,6 +16,7 @@ int casi_cmd_push(int argc, char **argv)
     int i, rc;
 
     memset(&local, 0, sizeof(local));
+    memset(&local_assets, 0, sizeof(local_assets));
 
     for (i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--dry-run") == 0)
@@ -27,10 +29,16 @@ int casi_cmd_push(int argc, char **argv)
     if ((rc = casi_ctx_open(&ctx)) != CASI_OK)
         return rc;
 
-    if ((rc = casi_ops_scan_local(&ctx, &local, &excluded)) != CASI_OK)
+    /* Publish/migrate config before scanning. In particular, a legacy local
+     * exclusion reaches the remote before this command can upload sessions. */
+    if (!dry_run && (rc = casi_ctx_publish_shared_config(&ctx)) != CASI_OK)
         goto done;
 
-    if ((rc = casi_store_write_tree(ctx.repo, ctx.provider->name, &local, &tree)) != CASI_OK)
+    if ((rc = casi_ops_scan_local(&ctx, &local, &local_assets, &excluded)) != CASI_OK)
+        goto done;
+
+    if ((rc = casi_store_write_tree(ctx.repo, ctx.provider->name, &local,
+                                    &local_assets, &tree)) != CASI_OK)
         goto done;
 
     if ((rc = casi_ctx_local_ref(&ctx, &refname)) != CASI_OK)
@@ -45,13 +53,15 @@ int casi_cmd_push(int argc, char **argv)
     else
         casi_error_clear();
 
-    casi_verbose("%zu session(s) scanned, %zu excluded", local.len, excluded);
+    casi_verbose("%zu session(s), %zu auxiliary file(s) scanned, %zu excluded",
+                 local.len, local_assets.len, excluded);
 
     if (dry_run) {
         if (unchanged)
             casi_info("nothing to push");
         else
-            casi_info("would push %zu session(s)", local.len);
+            casi_info("would push %zu session(s), %zu auxiliary file(s)",
+                      local.len, local_assets.len);
         rc = CASI_OK;
         goto done;
     }
@@ -72,12 +82,14 @@ int casi_cmd_push(int argc, char **argv)
     if (unchanged)
         casi_info("already up to date");
     else
-        casi_info("pushed %zu session(s)", local.len);
+        casi_info("pushed %zu session(s), %zu auxiliary file(s)",
+                  local.len, local_assets.len);
 
 done:
     casi_buf_dispose(&refname);
     casi_buf_dispose(&message);
     casi_entry_list_dispose(&local);
+    casi_asset_list_dispose(&local_assets);
     casi_ctx_dispose(&ctx);
     return rc;
 }

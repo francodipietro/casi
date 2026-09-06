@@ -147,6 +147,69 @@ bool casi_json_find_string(const char *data, size_t len, const char *key, casi_b
     return false;
 }
 
+bool casi_json_has_key(const char *data, size_t len, const char *key)
+{
+    size_t value;
+
+    return find_value_start(data, len, key, &value);
+}
+
+bool casi_json_find_string_array(const char *data, size_t len, const char *key,
+                                 casi_strvec *out)
+{
+    casi_strvec values = CASI_STRVEC_INIT;
+    casi_buf value = CASI_BUF_INIT;
+    size_t pos;
+    bool ok = false;
+
+    if (!find_value_start(data, len, key, &pos) || pos >= len || data[pos] != '[')
+        goto done;
+    pos++;
+
+    for (;;) {
+        size_t used;
+
+        while (pos < len && is_json_space(data[pos]))
+            pos++;
+        if (pos >= len)
+            goto done;
+        if (data[pos] == ']') {
+            ok = true;
+            break;
+        }
+        if (data[pos] != '"')
+            goto done;
+
+        used = unescape_into(data + pos + 1, len - pos - 1, &value);
+        if (used == 0 || casi_strvec_push(&values, casi_buf_cstr(&value)) != CASI_OK)
+            goto done;
+        pos += used + 1;  /* opening quote plus string body/closing quote */
+
+        while (pos < len && is_json_space(data[pos]))
+            pos++;
+        if (pos < len && data[pos] == ',') {
+            pos++;
+            continue;
+        }
+        if (pos < len && data[pos] == ']') {
+            ok = true;
+            break;
+        }
+        goto done;
+    }
+
+done:
+    casi_buf_dispose(&value);
+    if (!ok) {
+        casi_strvec_dispose(&values);
+        return false;
+    }
+
+    casi_strvec_dispose(out);
+    *out = values;
+    return true;
+}
+
 bool casi_jsonl_first_string(const char *data, size_t len, const char *key, casi_buf *out)
 {
     size_t start = 0;

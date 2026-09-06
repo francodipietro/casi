@@ -22,7 +22,8 @@ typedef enum {
     CASI_ENOMEM    = -6,  /* allocation failure                         */
     CASI_ECONFLICT = -7,  /* a session diverged between machines        */
     CASI_ENETWORK  = -8,  /* transport or authentication failure        */
-    CASI_EUNMAPPED = -9   /* remote references a root this machine lacks*/
+    CASI_EUNMAPPED = -9,  /* remote references a root this machine lacks*/
+    CASI_ERETRY    = -10  /* optimistic shared-state update lost a race */
 } casi_result;
 
 /* Exit statuses, as documented in the CLI contract. */

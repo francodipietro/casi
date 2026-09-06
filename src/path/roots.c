@@ -86,21 +86,30 @@ static void sort_by_path_len_desc(casi_roots *roots)
     }
 }
 
+bool casi_root_name_is_valid(const char *name)
+{
+    const char *p;
+
+    if (name == NULL || name[0] == '\0')
+        return false;
+    for (p = name; *p != '\0'; p++)
+        if (!continues_path_component(*p))
+            return false;
+    return true;
+}
+
 int casi_roots_add(casi_roots *roots, const char *name, const char *local_path)
 {
     struct root_entry entry;
-    const char *name_p;
     size_t i;
 
-    if (name[0] == '\0')
+    if (name == NULL || name[0] == '\0')
         return casi_error_set(CASI_EINVAL, "root name cannot be empty");
     if (local_path[0] == '\0')
         return casi_error_set(CASI_EINVAL, "root \"%s\" has an empty path", name);
-    for (name_p = name; *name_p != '\0'; name_p++)
-        if (!continues_path_component(*name_p))
-            return casi_error_set(CASI_EINVAL,
-                                  "root name \"%s\" contains an invalid character",
-                                  name);
+    if (!casi_root_name_is_valid(name))
+        return casi_error_set(CASI_EINVAL,
+                              "root name \"%s\" contains an invalid character", name);
 
     /* Replacing an existing name keeps the table free of ambiguity. */
     for (i = 0; i < roots->len; i++) {
