@@ -1,18 +1,16 @@
 # Handoff: casi
 
-Written 2026-09-04, at the end of Phase 1 implementation. Franco is moving
-this side project from Claude Code to Codex for ongoing work (Claude Code
-stays for his day job). This document is the full state transfer: what casi
-is, what exists, what's verified, what's deliberately not done yet, and the
-facts a fresh agent should not re-derive or assume — several of these were
-only established by live experimentation, not by reading documentation that
-doesn't exist.
+Originally written 2026-09-04 at the end of Phase 1, when Franco moved this
+side project from Claude Code to Codex for ongoing work (Claude Code stays for
+his day job). It preserves the empirical findings that a later agent must not
+re-derive or assume — several came from live experimentation rather than
+documentation.
 
-> **Historical snapshot.** Phase 1 was subsequently squash-merged as PR #2
-> (`a3f0e41`). Its branch state in §2 and the pre-PR checklist in §7 are no
-> longer current instructions. Keep this file for the empirical evidence and
-> rationale it records; use the durable docs plus the current git state when
-> starting later work.
+> **Phase 2 closeout (2026-09-06).** Phase 1 was squash-merged as PR #2
+> (`a3f0e41`), its follow-up as PR #3 (`d333228`), CI scoping as PR #4
+> (`d869551`), and Phase 2 as PR #5 (`c9a19b5`). The Phase 1 branch snapshot
+> and pre-PR checklist are historical. Sections 2, 4, 6 and 7 now give the
+> current baseline; retain the rest for its empirical evidence and rationale.
 
 Read this whole file before touching git or writing code. Section 2 in
 particular describes a real risk to the actual work product.
@@ -33,50 +31,50 @@ exposing only `init`/`push`/`pull`/`sync`/`status`, never branches or commits.
 - **House style, testing conventions, the error-reporting contract:**
   [CONTRIBUTING.md](CONTRIBUTING.md)
 
-Those four files are the durable record. This file is a snapshot of *state*
-at handoff time — once Phase 1 lands and this gets folded into the above, it
-can be deleted.
+Those four files are the durable record. This file preserves the empirical
+handoff evidence plus the Phase 2 closeout baseline; use it alongside the
+current git state rather than as a replacement for the durable docs.
 
-## 2. Current state — read before touching git
+## 2. Current state — Phase 3 baseline
 
-- Repo: `github.com/francodipietro/casi` (private). Remote `origin` over SSH.
-- `main`: Phase 0 only. PR #1, squashed as `976c7ed "chore: phase 0 project
-  scaffolding"`. Build system, portability layer (`util/`), config on top of
-  `git_config_*`, `casi --version`/`config`. CI green on push/PR (Linux
-  gcc+clang, macOS clang, valgrind, a job that vendors libgit2 with the exec
-  SSH transport).
-- Branch `phase-1-mvp`: checked out locally, branched from and up to date
-  with `main` (no divergence — `git merge-base --is-ancestor main
-  phase-1-mvp` is true). Contains the **entire Phase 1 MVP**, see §3.
+- Repo: `github.com/francodipietro/casi` (private). Remote `origin` uses SSH.
+- `main`: `c9a19b5 feat(paths): phase 2 path normalization`, the squash merge
+  of PR #5. It includes Phase 0, Phase 1 and its SSH/roundtrip follow-up,
+  scoped CI, and Phase 2.
+- Phase 2 made `refs/heads/casi/config` the authoritative shared
+  configuration. It publishes named roots and `sync.exclude`, migrates legacy
+  local exclusions on first publish, diagnoses shared root mappings with
+  `casi doctor`, and syncs Claude Code subagents and project memory.
+- The last merged PR had a final Copilot review with no actionable comments;
+  its CI run was green on Linux/macOS debug and sanitizer jobs, valgrind,
+  vendored-libgit2/exec-SSH, and GitGuardian.
 
-**The Phase 1 work is committed** as `bd23ee3 "feat: phase 1 MVP --
-push/pull/sync against any git remote"` (46 files, 5,495 insertions) on
-`phase-1-mvp`, on top of `main`. **It is not pushed** — `origin` has no idea
-this branch exists yet. Nothing else is staged or modified; `git status`
-should read clean.
-
-Before doing anything else:
+Before beginning a new phase, refresh and inspect the actual baseline rather
+than relying on a local branch:
 
 ```sh
-git log --oneline -3   # bd23ee3, then 976c7ed (main), then the initial commit
-git status --short     # should print nothing
+git fetch origin
+git log --oneline -3 origin/main
+git status --short
 ```
 
-If that doesn't match, something already happened to this checkout since
-this was written — stop and figure out what before writing new code on top
-of an assumption that isn't true anymore.
-
-Next step is §7: push the branch, open the PR, decide gap #1 first.
-
-Commit message convention Franco wants going forward (given mid-project,
-after the phase-0 PR title was renamed to match): [Conventional
+Commit and PR convention: [Conventional
 Commits](https://gist.github.com/joshbuchea/6f47e86d2510bce28f8e7f42ae84c716)
-— `type(scope): summary`, body in prose explaining *why*. No AI co-author
-trailer in commits (`Co-Authored-By: ...`) — Franco rejected that explicitly
-for this project. One PR per phase, squash-merged, PR title itself in
-Conventional Commits form since squash makes it the commit message on `main`.
+(`type(scope): summary`), no AI co-author trailer, one PR per phase, and
+squash merge only with Franco's explicit authorization. The PR title is the
+eventual commit message on `main`.
 
-## 3. What's built (Phase 0 + Phase 1)
+## 3. What's built (through Phase 2)
+
+Phase 2 added the shared-configuration module, `casi doctor`, shared exclusion
+mutation, and provider/store support for auxiliary assets. The relevant test
+coverage is `test_shared_config` plus `shared_config`, `doctor`,
+`auxiliary_files`, and `nested_roots` integration tests. Its detailed design
+is deliberately recorded in `docs/DESIGN.md`; do not recreate a second source
+of truth here.
+
+The inventory below is the original Phase 1 snapshot. Read it as background
+for the stable MVP machinery, not as a complete current file tree.
 
 ```
 src/
@@ -130,14 +128,22 @@ casi include <path>          # resume syncing it
 casi config <key> [<value>] | --list | --unset <key>
 ```
 
+Phase 2 also ships the hidden plumbing command `casi doctor`, which reports
+the active SSH backend, remote reachability, and shared-root mappings.
+
 Exit codes match PLAN.md §4: `0` ok, `1` error, `2` usage, `3` conflict, `4`
 network, `5` an unmapped root.
 
 ## 4. What's actually verified, and how
 
-- `ctest --preset dev` (ASan+UBSan): **14/14 green.** Also clean under plain
-  `debug` and under `static` (vendored libgit2, exec SSH transport, 1.1 MB
-  binary, zero non-system dynamic deps).
+- `ctest --preset dev` (ASan+UBSan): **20/20 green** at the Phase 2 closeout.
+  The suite includes `test_shared_config` and the four new Phase 2 integration
+  tests. CI confirmed that same phase on Linux/macOS debug and sanitizer jobs,
+  valgrind, and vendored libgit2 with the exec SSH transport.
+- Phase 2 integration tests prove shared-exclusion migration and enforcement
+  on a new machine, `doctor`'s unmapped-root exit and remediation, subagent and
+  memory synchronisation/conflict parking, and the nested-root-to-flat-root
+  mapping case.
 - Manual end-to-end, by hand, redone after every fix until clean:
   - Two isolated "machines" (`$CASI_HOME`/`$CASI_CLAUDE_HOME` pointed at
     scratch dirs) with **different local layouts** (`~/src/...` vs
@@ -215,59 +221,35 @@ matters more than the diff.
    from macOS. **Lesson applied since:** a CI change isn't done until its own
    run is actually green, not until it merges without visible local errors.
 
-## 6. Known gaps — deliberately deferred, not forgotten
+## 6. Known gaps — Phase 3 baseline
 
-1. **`sync.exclude` is local-only, not shared via the remote.** Before Phase 1
-   began, it was explicitly decided (see conversation history / the decision
-   is not yet written into PLAN.md's original text, only into this handoff
-   and the supersession note at the top of PLAN.md) that the exclude list
-   should live in the remote's `casi.json`, so a brand-new machine respects
-   existing exclusions from its very first push — otherwise a machine that
-   has never run `casi exclude bookit` will push a client's sessions before
-   anyone remembers to configure it there too. **What's implemented instead**
-   reads/writes `sync.exclude` purely from local
-   `~/.config/casi/config` (`casi_ctx_exclude_list()` in `src/core/ctx.c`,
-   backed by `casi_config_get_multivar()`). This is the most important open
-   item — treat it as a correctness gap, not a nice-to-have, before pointing
-   casi at any machine that also holds client work mixed with personal
-   projects (Franco's actual situation: `bookit`/`nemogroup` alongside
-   personal repos).
-2. **`casi doctor` does not exist.** Referenced only in comments (grep for
-   "doctor" in `src/` — it's all prose, no `cmd_doctor.c`). Per PLAN.md §4,
-   it should diagnose unmapped roots, an unreachable remote, and repo
-   corruption.
-3. **No SSH remote has ever been exercised.** Every test above uses
-   `file://`. `credential_cb`/`certificate_cb`/`hostkey_is_known()` in
-   `src/core/repo.c` implement agent-based auth and known_hosts verification
-   for the libssh2 backend (the one Homebrew actually ships — see
-   `docs/DESIGN.md`), but none of it has run against a real `git@host:...`
-   remote yet. This is the natural next verification step.
-4. **Three tests from PLAN.md §8 don't exist yet:**
-   - `large_session` — an automated synthetic-200MB push/append/push/assert-
-     small-transfer test. The equivalent was done by hand against the real
-     137 MB file (§4), not automated.
-   - `roundtrip` — A→B→A byte-exact, as a standalone assertion.
-     `two_machines.sh` covers one-way translation plus idempotence, not the
-     full round trip back to the origin machine.
-   - `ssh_remote` — a CI job with a local `sshd`, blocked on gap #3 above.
-5. **Full named-roots UX from PLAN.md §5.1 is partly Phase-2 scope.** What
-   exists (`src/path/roots.c`) is the real longest-prefix matcher, config
-   loading (`root.<name>.path`), and text substitution — fully working, unit
-   tested (`test_roots.c`). What's *not* built: roots being discovered from
-   `casi.json` automatically (so a new machine sees what root names exist
-   without being told), and the `casi doctor`-driven unmapped-root workflow.
-   This was always Phase 2 per the plan; noted here only so it isn't mistaken
-   for a Phase 1 miss.
+1. **No stat-cache or append-tail hashing.** `casi_paths_index()` reserves the
+   on-disk location, but scans still read and normalise complete transcripts.
+   This is the main performance feature left for Phase 3.
+2. **The large-session proof is still manual.** The chunking strategy was
+   exercised against the real 137 MB session recorded in §4, but the planned
+   synthetic 200 MB push/append/push transfer-budget test is still absent.
+3. **Conflict recovery is not yet discoverable as a command.** Parking and
+   `casi pull --theirs` work; the planned `casi conflicts` command does not.
+   GC/repack plumbing is also still absent.
+4. **Interruption handling needs an explicit audit.** Transcript and auxiliary
+   materialisation use atomic writes, but Phase 3 should check every mutable
+   state transition and add regression coverage for interruption boundaries.
+5. **SSH coverage is not autonomous.** The SSH fallback was hardened in PR #3
+   and CI exercises the vendored `exec` transport, but PLAN.md's local-`sshd`
+   integration job is still missing.
 
-## 7. Before opening the Phase 1 PR
+Deliberately later: opt-in encryption (Phase 4), distribution (Phase 5),
+deletions (Phase 6), Windows (Phase 7), and a second provider (Phase 8).
 
-- [ ] Decide gap #1 (§6) — at minimum, decide explicitly to leave it local-only
-      for the MVP and say so in the PR description, rather than let it pass
-      silently.
-- [ ] `git commit` the staged work (§2) with a Conventional Commits message,
-      push `phase-1-mvp`, open a PR against `main`.
-- [ ] Request the same Copilot code review Phase 0 got (`gh api --method POST
-      repos/francodipietro/casi/pulls/<n>/requested_reviewers -f
-      "reviewers[]=copilot-pull-request-reviewer[bot]"` — it shows up as a
-      check run, not in the reviewers list, that's normal).
-- [ ] Confirm CI is green on the PR itself, not just locally — see §5, point 5.
+## 7. Before opening the Phase 3 PR
+
+- [ ] Define the stat-cache record and invalidation contract before modifying
+      scan/store code; preserve the existing chunk-prefix correctness rules.
+- [ ] Add `large_session` first enough to measure the promised transfer bound,
+      then use it to drive append-tail hashing.
+- [ ] Decide whether `casi conflicts`, GC/repack, and interruption coverage
+      belong in the same Phase 3 PR or whether the phase needs a narrower
+      acceptance criterion.
+- [ ] Run `ctest --preset dev`, request Copilot review, and confirm PR CI is
+      green before asking for an explicitly authorized squash merge.
