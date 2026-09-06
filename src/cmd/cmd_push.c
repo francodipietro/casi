@@ -60,7 +60,8 @@ int casi_cmd_push(int argc, char **argv)
         if (unchanged)
             casi_info("nothing to push");
         else
-            casi_info("would push %zu session(s)", local.len);
+            casi_info("would push %zu session(s), %zu auxiliary file(s)",
+                      local.len, local_assets.len);
         rc = CASI_OK;
         goto done;
     }
@@ -81,7 +82,8 @@ int casi_cmd_push(int argc, char **argv)
     if (unchanged)
         casi_info("already up to date");
     else
-        casi_info("pushed %zu session(s)", local.len);
+        casi_info("pushed %zu session(s), %zu auxiliary file(s)",
+                  local.len, local_assets.len);
 
 done:
     casi_buf_dispose(&refname);

@@ -277,8 +277,8 @@ int casi_cmd_pull(int argc, char **argv)
             casi_warn("%zu auxiliary file(s) differ and were left untouched locally",
                       asset_conflicts);
         if (conflicts > 0) {
-        casi_warn("%zu session(s) diverged and were left untouched locally", conflicts);
-        casi_info("  take the remote copy with: casi pull --theirs <session-id>");
+            casi_warn("%zu session(s) diverged and were left untouched locally", conflicts);
+            casi_info("  take the remote copy with: casi pull --theirs <session-id>");
         }
         rc = CASI_ECONFLICT;
     } else {

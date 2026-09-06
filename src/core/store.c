@@ -108,7 +108,7 @@ int casi_asset_list_push_owned(casi_asset_list *list, casi_asset *asset)
         casi_asset *p = realloc(list->items, cap * sizeof(*p));
 
         if (p == NULL)
-            return casi_error_set(CASI_ENOMEM, "out of memory listing auxiliary files");
+            return casi_error_set(CASI_ENOMEM, "out of memory growing asset list");
         list->items = p;
         list->cap = cap;
     }
