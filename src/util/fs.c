@@ -185,6 +185,51 @@ int casi_fs_read_file(const char *path, casi_buf *out)
     return CASI_OK;
 }
 
+int casi_fs_read_file_from(const char *path, uint64_t offset, casi_buf *out)
+{
+    FILE *f;
+    casi_stat st;
+    int rc;
+
+    if ((rc = casi_fs_stat(path, &st)) != CASI_OK)
+        return rc;
+    if (st.is_dir)
+        return casi_error_set(CASI_EINVAL, "is a directory: %s", path);
+    if (offset > st.size)
+        return casi_error_set(CASI_EINVAL, "offset is past end of file: %s", path);
+    if ((f = fopen(path, "rb")) == NULL)
+        return casi_error_set(CASI_EIO, "cannot open %s: %s", path, strerror(errno));
+    if (fseeko(f, (off_t)offset, SEEK_SET) != 0) {
+        fclose(f);
+        return casi_error_set(CASI_EIO, "cannot seek %s: %s", path, strerror(errno));
+    }
+
+    casi_buf_clear(out);
+    if ((rc = casi_buf_grow(out, (size_t)(st.size - offset))) != CASI_OK) {
+        fclose(f);
+        return rc;
+    }
+    for (;;) {
+        size_t got;
+
+        if ((rc = casi_buf_grow(out, 65536)) != CASI_OK) {
+            fclose(f);
+            return rc;
+        }
+        got = fread(out->ptr + out->len, 1, out->cap - out->len - 1, f);
+        out->len += got;
+        out->ptr[out->len] = '\0';
+        if (got == 0)
+            break;
+    }
+    if (ferror(f)) {
+        fclose(f);
+        return casi_error_set(CASI_EIO, "error reading %s", path);
+    }
+    fclose(f);
+    return CASI_OK;
+}
+
 int casi_fs_read_file_prefix(const char *path, size_t max, casi_buf *out)
 {
     FILE *f;

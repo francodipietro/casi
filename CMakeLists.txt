@@ -101,6 +101,7 @@ add_library(casi_core STATIC
     src/path/encoding.c
     src/path/roots.c
     src/core/chunk.c
+    src/core/index.c
     src/core/repo.c
     src/core/shared_config.c
     src/core/store.c

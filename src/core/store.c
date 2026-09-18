@@ -2,6 +2,7 @@
 #include "casi/store.h"
 #include "casi/casi.h"
 #include "casi/chunk.h"
+#include "casi/index.h"
 #include "casi/jsonl.h"
 
 #include <inttypes.h>
@@ -186,6 +187,8 @@ struct chunk_writer {
     git_oid   *oids;
     size_t     capacity;
     size_t     written;
+    size_t     offset;
+    size_t     last_start;
 };
 
 static int write_one_chunk(const void *data, size_t len, size_t index, void *payload)
@@ -195,6 +198,8 @@ static int write_one_chunk(const void *data, size_t len, size_t index, void *pay
     if (index >= w->capacity)
         return casi_error_set(CASI_ERROR, "chunk count changed mid-write");
 
+    w->last_start = w->offset;
+    w->offset += len;
     w->written = index + 1;
     return casi_repo_write_blob(w->repo, data, len, &w->oids[index]);
 }
@@ -213,65 +218,214 @@ static bool is_excluded(const casi_strvec *exclude, const char *project_path)
     return false;
 }
 
+static bool stats_equal(const casi_stat *a, const casi_stat *b)
+{
+    return a->size == b->size && a->mtime_sec == b->mtime_sec &&
+           a->mtime_nsec == b->mtime_nsec && a->ino == b->ino;
+}
+
+/* Normalisation only substitutes path bytes, never newlines.  Chunk starts
+ * are always after newlines, so counting them maps a normalized chunk start
+ * back to its exact source-file offset without retaining the whole mapping. */
+static int raw_offset_for_normalized_boundary(const casi_buf *raw,
+                                              const casi_buf *normalized,
+                                              size_t normalized_offset,
+                                              size_t *out)
+{
+    size_t needed = 0, seen = 0, i;
+
+    if (normalized_offset > normalized->len)
+        return casi_error_set(CASI_ERROR, "invalid normalized chunk boundary");
+    for (i = 0; i < normalized_offset; i++)
+        if (normalized->ptr[i] == '\n')
+            needed++;
+    if (needed == 0) {
+        *out = 0;
+        return CASI_OK;
+    }
+    for (i = 0; i < raw->len; i++) {
+        if (raw->ptr[i] != '\n')
+            continue;
+        if (++seen == needed) {
+            *out = i + 1;
+            return CASI_OK;
+        }
+    }
+    return casi_error_set(CASI_ERROR, "cannot map normalized chunk boundary to source");
+}
+
+static int write_chunks(casi_repo *repo, const casi_buf *normalized,
+                        struct chunk_writer *writer)
+{
+    size_t count = casi_chunk_count(normalized->ptr, normalized->len, CASI_CHUNK_TARGET);
+
+    memset(writer, 0, sizeof(*writer));
+    if (count == 0)
+        return CASI_OK;
+    writer->oids = calloc(count, sizeof(*writer->oids));
+    if (writer->oids == NULL)
+        return casi_error_set(CASI_ENOMEM, "out of memory chunking transcript");
+    writer->repo = repo;
+    writer->capacity = count;
+    return casi_chunk_split(normalized->ptr, normalized->len, CASI_CHUNK_TARGET,
+                            write_one_chunk, writer);
+}
+
+static int entry_take_chunks(const casi_session *session, git_oid **chunks,
+                             size_t chunk_count, uint64_t bytes,
+                             casi_entry_list *out)
+{
+    casi_entry entry;
+    int rc;
+
+    memset(&entry, 0, sizeof(entry));
+    entry.session_id = casi_strdup(session->session_id);
+    entry.project_path = casi_strdup(session->project_path);
+    entry.project_id = casi_strdup(session->project_id);
+    entry.chunks = *chunks;
+    entry.chunk_count = chunk_count;
+    entry.bytes = bytes;
+    *chunks = NULL;
+    if (entry.session_id == NULL || entry.project_path == NULL || entry.project_id == NULL) {
+        entry_dispose(&entry);
+        return casi_error_set(CASI_ENOMEM, "out of memory storing %s", session->session_id);
+    }
+    if ((rc = entry_list_push(out, &entry)) != CASI_OK) {
+        entry_dispose(&entry);
+        return rc;
+    }
+    return CASI_OK;
+}
+
+static bool cache_entry_is_valid(casi_repo *repo, const casi_index_entry *cached)
+{
+    uint64_t total = 0, last_size = 0;
+    size_t i;
+
+    if (cached == NULL)
+        return false;
+    if (!casi_index_entry_is_well_formed(cached))
+        return false;
+    for (i = 0; i < cached->chunk_count; i++) {
+        uint64_t size;
+
+        /* Blob lookup rejects tree and commit OIDs as well as missing objects.
+         * A malformed local cache must be a miss, never input to a push. */
+        if (casi_repo_blob_size(repo, &cached->chunks[i], &size) != CASI_OK) {
+            casi_error_clear();
+            return false;
+        }
+        if (size > UINT64_MAX - total)
+            return false;
+        total += size;
+        last_size = size;
+    }
+    if (total != cached->normalized_bytes ||
+        cached->tail_normalized_offset != total - last_size)
+        return false;
+    if (cached->tail_raw_offset > cached->stat.size)
+        return false;
+    return true;
+}
+
 static int scan_one_session(casi_repo *repo, const casi_roots *roots,
+                            casi_index *index, const char *provider_name,
                             const casi_session *session, casi_entry_list *out)
 {
     casi_buf raw = CASI_BUF_INIT, normalized = CASI_BUF_INIT;
     struct chunk_writer writer;
-    casi_entry entry;
-    size_t count;
+    const casi_index_entry *cached;
+    casi_stat before, after;
+    git_oid *chunks = NULL;
+    size_t chunk_count, raw_tail, tail_normalized;
+    uint64_t bytes;
+    bool resume = false;
     int rc;
 
-    memset(&entry, 0, sizeof(entry));
     memset(&writer, 0, sizeof(writer));
 
-    if ((rc = casi_fs_read_file(session->local_path, &raw)) != CASI_OK)
+    if ((rc = casi_fs_stat(session->local_path, &before)) != CASI_OK)
+        goto done;
+    cached = casi_index_find(index, provider_name, session->local_path);
+    if (casi_index_entry_matches(cached, &before) && cache_entry_is_valid(repo, cached)) {
+        if (cached->chunk_count > 0) {
+            chunks = malloc(cached->chunk_count * sizeof(*chunks));
+            if (chunks == NULL) {
+                rc = casi_error_set(CASI_ENOMEM, "out of memory reusing stat cache");
+                goto done;
+            }
+            memcpy(chunks, cached->chunks, cached->chunk_count * sizeof(*chunks));
+        }
+        rc = entry_take_chunks(session, &chunks, cached->chunk_count,
+                               cached->normalized_bytes, out);
+        goto done;
+    }
+
+    resume = casi_index_entry_can_resume(cached, &before) && cache_entry_is_valid(repo, cached);
+    if (resume)
+        rc = casi_fs_read_file_from(session->local_path, cached->tail_raw_offset, &raw);
+    else
+        rc = casi_fs_read_file(session->local_path, &raw);
+    if (rc != CASI_OK)
         goto done;
 
     /* Normalise first, chunk second: this ordering is what makes two machines
      * with different layouts produce identical blobs. */
     if ((rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
         goto done;
+    if ((rc = write_chunks(repo, &normalized, &writer)) != CASI_OK)
+        goto done;
 
-    count = casi_chunk_count(normalized.ptr, normalized.len, CASI_CHUNK_TARGET);
+    if (resume) {
+        size_t prefix_count = cached->chunk_count > 0 ? cached->chunk_count - 1 : 0;
+        size_t tail_raw_relative;
 
-    if (count > 0) {
-        writer.repo = repo;
-        writer.capacity = count;
-        writer.oids = calloc(count, sizeof(git_oid));
-        if (writer.oids == NULL) {
-            rc = casi_error_set(CASI_ENOMEM, "out of memory chunking %s",
-                                session->session_id);
+        if (prefix_count > SIZE_MAX - writer.written) {
+            rc = casi_error_set(CASI_ENOMEM, "too many transcript chunks");
             goto done;
         }
-
-        if ((rc = casi_chunk_split(normalized.ptr, normalized.len,
-                                   CASI_CHUNK_TARGET, write_one_chunk,
-                                   &writer)) != CASI_OK)
+        chunk_count = prefix_count + writer.written;
+        if (chunk_count > 0) {
+            chunks = calloc(chunk_count, sizeof(*chunks));
+            if (chunks == NULL) {
+                rc = casi_error_set(CASI_ENOMEM, "out of memory extending stat cache");
+                goto done;
+            }
+            if (prefix_count > 0)
+                memcpy(chunks, cached->chunks, prefix_count * sizeof(*chunks));
+            if (writer.written > 0)
+                memcpy(chunks + prefix_count, writer.oids,
+                       writer.written * sizeof(*chunks));
+        }
+        if ((rc = raw_offset_for_normalized_boundary(&raw, &normalized,
+                                                      writer.last_start,
+                                                      &tail_raw_relative)) != CASI_OK)
             goto done;
+        raw_tail = (size_t)cached->tail_raw_offset + tail_raw_relative;
+        tail_normalized = (size_t)cached->tail_normalized_offset + writer.last_start;
+        bytes = cached->tail_normalized_offset + normalized.len;
+    } else {
+        chunk_count = writer.written;
+        chunks = writer.oids;
+        writer.oids = NULL;
+        if ((rc = raw_offset_for_normalized_boundary(&raw, &normalized,
+                                                      writer.last_start, &raw_tail)) != CASI_OK)
+            goto done;
+        tail_normalized = writer.last_start;
+        bytes = normalized.len;
     }
 
-    entry.session_id   = casi_strdup(session->session_id);
-    entry.project_path = casi_strdup(session->project_path);
-    entry.project_id   = casi_strdup(session->project_id);
-    entry.chunks       = writer.oids;
-    entry.chunk_count  = count;
-    entry.bytes        = (uint64_t)normalized.len;
-
-    if (entry.session_id == NULL || entry.project_path == NULL ||
-        entry.project_id == NULL) {
-        rc = CASI_ENOMEM;
+    if ((rc = entry_take_chunks(session, &chunks, chunk_count, bytes, out)) != CASI_OK)
         goto done;
-    }
-
-    writer.oids = NULL;  /* ownership moved into the entry */
-    if ((rc = entry_list_push(out, &entry)) != CASI_OK)
+    if ((rc = casi_fs_stat(session->local_path, &after)) != CASI_OK)
         goto done;
-    memset(&entry, 0, sizeof(entry));
-    rc = CASI_OK;
+    if (stats_equal(&before, &after))
+        rc = casi_index_update(index, provider_name, session->local_path, &before,
+                               raw_tail, tail_normalized, bytes,
+                               out->items[out->len - 1].chunks, chunk_count);
 
 done:
-    entry_dispose(&entry);
+    free(chunks);
     free(writer.oids);
     casi_buf_dispose(&raw);
     casi_buf_dispose(&normalized);
@@ -322,6 +476,7 @@ int casi_store_scan_local(casi_repo *repo, const casi_roots *roots,
 {
     casi_session_list sessions;
     casi_aux_file_list aux_files;
+    casi_index *index = NULL;
     size_t i, skipped = 0;
     int rc;
 
@@ -329,6 +484,8 @@ int casi_store_scan_local(casi_repo *repo, const casi_roots *roots,
     memset(&aux_files, 0, sizeof(aux_files));
 
     if ((rc = provider->discover(roots, &sessions, &aux_files)) != CASI_OK)
+        goto done;
+    if ((rc = casi_index_open(roots, &index)) != CASI_OK)
         goto done;
 
     for (i = 0; i < sessions.len; i++) {
@@ -338,7 +495,8 @@ int casi_store_scan_local(casi_repo *repo, const casi_roots *roots,
             continue;
         }
 
-        if ((rc = scan_one_session(repo, roots, &sessions.items[i], out)) != CASI_OK)
+        if ((rc = scan_one_session(repo, roots, index, provider->name,
+                                   &sessions.items[i], out)) != CASI_OK)
             goto done;
     }
 
@@ -349,13 +507,14 @@ int casi_store_scan_local(casi_repo *repo, const casi_roots *roots,
             goto done;
     }
 
-    rc = CASI_OK;
+    rc = casi_index_flush(index);
 
 done:
     if (excluded_out != NULL)
         *excluded_out = skipped;
     casi_session_list_dispose(&sessions);
     casi_aux_file_list_dispose(&aux_files);
+    casi_index_free(index);
     return rc;
 }
 

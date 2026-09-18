@@ -30,6 +30,39 @@ id, so a push adds exactly one new blob.
 machines with different local layouts produce *identical* blobs for the same
 logical session. Deduplication and the prefix rule below both depend on that.
 
+## The stat cache is local and disposable
+
+Scanning every Claude transcript on every `status` is needlessly expensive:
+the scan normalises every byte before it can calculate chunk object ids. casi
+therefore keeps a private binary cache at `<data dir>/index`. It never travels
+with the git store: its keys contain absolute local paths and local root paths.
+
+An entry is keyed by provider plus transcript path and records the source
+`size`, nanosecond `mtime`, inode, normalized length, ordered chunk OIDs, and
+the raw and normalized offsets where the final chunk begins. The file header
+also carries an exact snapshot of the configured roots. A different root
+table, cache format, structurally malformed cache, missing or non-blob OID,
+inode change, size change, or mtime change at an equal size is a cache miss
+and causes a full scan. The cache is rewritten atomically only after the file
+has the same stat tuple both
+before and after scanning, so a transcript changing underneath casi never
+creates a trusted record for a mixed read.
+
+For a larger file on the same inode, casi reuses all chunks before the former
+final chunk and reads from that final chunk's source-line boundary through EOF.
+It normalises and chunks that tail again; this is necessary because the former
+tail is the one mutable chunk. Normalisation never changes newline bytes, so
+counting newlines maps that new normalized tail boundary back to the correct
+raw byte offset without holding a per-byte translation table.
+
+Like Git's stat cache, the growth fast path trusts the filesystem metadata to
+mean "the old bytes stayed put and new bytes were appended". A program that
+rewrites an earlier prefix while also growing the same inode can defeat any
+metadata-only cache; detecting that case requires rereading the prefix and
+removes the performance win. Claude Code's observed transcript writer is
+append-only, while ordinary rewrites with the same or smaller size continue to
+fall back to a full scan and reach the normal prefix-conflict logic.
+
 ## Conflicts are decided by prefix, not by timestamp
 
 Comparing the two chunk-id lists for a session answers everything, with no
