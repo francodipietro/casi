@@ -6,7 +6,7 @@ sessions between machines.
 Start a Claude Code session on your laptop, `casi push`, then `casi pull` on your
 desktop and pick up exactly where you left off.
 
-> Status: early development. Phase 3 is complete — see [Roadmap](#roadmap).
+> Status: early development. Phase 4 is complete — see [Roadmap](#roadmap).
 
 ## What it does
 
@@ -95,7 +95,7 @@ library into your prefix. Take `build/static/casi` directly, or install from
 | 1 | MVP: `init`/`status`/`push`/`pull`/`sync` against any git remote | done |
 | 2 | Shared named roots, full path normalization, `doctor`, memory and subagents | done |
 | 3 | Stat-cache, large-session coverage, `casi conflicts`, GC/repack and interruption audit | done |
-| 4 | Opt-in encryption (libsodium, convergent per chunk) | |
+| 4 | Opt-in encryption (libsodium, convergent per chunk) | done |
 | 5 | Prebuilt binaries, Homebrew tap, packages | |
 | 6 | Deletions and `casi forget` | |
 | 7 | Windows support | |

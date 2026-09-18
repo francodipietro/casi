@@ -6,10 +6,11 @@ his day job). It preserves the empirical findings that a later agent must not
 re-derive or assume — several came from live experimentation rather than
 documentation.
 
-> **Phase 3 closeout (2026-09-17).** Phase 1 was squash-merged as PR #2
+> **Phase 4 closeout (2026-09-18).** Phase 1 was squash-merged as PR #2
 > (`a3f0e41`), its follow-up as PR #3 (`d333228`), CI scoping as PR #4
 > (`d869551`), Phase 2 as PR #5 (`c9a19b5`), and Phase 3 as PR #7
-> (`6554208`). The Phase 1 snapshot and the pre-Phase-3 checklist are
+> (`6554208`), and Phase 4 as PR #9 (`ad7ba54`). The Phase 1 snapshot and
+> pre-Phase-3 checklist are
 > historical. Sections 2, 4, 6 and 7 give the current baseline; retain the
 > rest for its empirical evidence and rationale.
 
@@ -33,15 +34,15 @@ exposing only `init`/`push`/`pull`/`sync`/`status`, never branches or commits.
   [CONTRIBUTING.md](CONTRIBUTING.md)
 
 Those four files are the durable record. This file preserves the empirical
-handoff evidence plus the Phase 2 closeout baseline; use it alongside the
+handoff evidence plus the Phase 4 closeout baseline; use it alongside the
 current git state rather than as a replacement for the durable docs.
 
-## 2. Current state — Phase 4 baseline
+## 2. Current state — Phase 5 baseline
 
 - Repo: `github.com/francodipietro/casi` (private). Remote `origin` uses SSH.
-- `main`: `6554208 feat(performance): complete phase 3 robustness`, the squash
-  merge of PR #7. It includes Phase 0, Phase 1 and its SSH/roundtrip follow-up,
-  scoped CI, and Phases 2 and 3.
+- `main`: `ad7ba54 feat(crypto): add opt-in encrypted stores`, the squash merge
+  of PR #9. It includes Phase 0, Phase 1 and its SSH/roundtrip follow-up,
+  scoped CI, and Phases 2 through 4.
 - Phase 2 made `refs/heads/casi/config` the authoritative shared
   configuration. It publishes named roots and `sync.exclude`, migrates legacy
   local exclusions on first publish, diagnoses shared root mappings with
@@ -53,9 +54,17 @@ current git state rather than as a replacement for the durable docs.
   table and source stat tuple, verifies cached OIDs are blobs, and has a
   checksum over its private serialized form. See `docs/DESIGN.md` rather than
   duplicating its validity contract.
-- PR #7 received an independent local-agent review. Its actionable cache and
-  GC-test findings were fixed and re-reviewed clean; no GitHub reviewer was
-  requested. CI was green on the full Linux/macOS matrix, valgrind,
+- Phase 4 added opt-in encrypted stores. `casi init --encrypt` uses a private
+  local `0600` keyfile; the key is never written to Git and a pre-existing
+  remote must be joined with an explicitly copied matching key. Remote content
+  is deterministically encrypted and remote path components are HMACed, while
+  the shared-config header stays clear only to advertise encryption mode and a
+  non-secret key identifier. `docs/DESIGN.md` records the security and trust
+  boundaries, including authenticated session manifests and auxiliary scopes.
+- PR #9 received independent local-agent reviews. The initial reviews found
+  missing authenticated bindings for session chunks and auxiliary scopes; both
+  were fixed and the final review was clean. No GitHub reviewer was requested.
+  CI was green on the full Linux/macOS matrix, valgrind,
   vendored-libgit2/exec-SSH, GitGuardian, and the final `CI` gate.
 
 Before beginning a new phase, refresh and inspect the actual baseline rather
@@ -73,7 +82,7 @@ Commits](https://gist.github.com/joshbuchea/6f47e86d2510bce28f8e7f42ae84c716)
 squash merge only with Franco's explicit authorization. The PR title is the
 eventual commit message on `main`.
 
-## 3. What's built (through Phase 3)
+## 3. What's built (through Phase 4)
 
 Phase 2 added the shared-configuration module, `casi doctor`, shared exclusion
 mutation, and provider/store support for auxiliary assets. The relevant test
@@ -89,6 +98,13 @@ parked copies without changing them. `casi gc` repacks/prunes only the local
 bare store through fixed-argv `git gc --prune=now`; ordinary sync remains
 libgit2-only. `large_session`, `gc`, and `interruption` are integration tests;
 `test_index` covers cache structure, invalidation, and checksum rejection.
+
+Phase 4 adds `core/crypto.c` and `include/casi/crypto.h`, with separated
+content, nonce, and path keys derived from the local master key. The repository
+layer transparently encrypts ordinary blobs; shared configuration retains a
+small clear header and encrypts its payload. Encrypted store paths use HMAC
+components, and session metadata authenticates the chunk tree it references.
+`test_crypto` and `encryption` cover the primitives and two-machine workflow.
 
 The inventory below is the original Phase 1 snapshot. Read it as background
 for the stable MVP machinery, not as a complete current file tree.
@@ -126,10 +142,12 @@ src/
                          "still valid JSON after substitution" check
 include/casi/            one header per module above, plus casi.h aggregating
 tests/
-  unit/                  test_{buf,str,fs,paths,config} (Phase 0) +
-                         test_{encoding,roots,chunk,index} (Phases 1–3)
-  integration/           two_machines.sh, conflict.sh, large_session.sh,
-                         gc.sh, interruption.sh — real casi binary, real
+  unit/                  test_{buf,str,fs,paths,config,jsonl,encoding,roots,
+                         chunk,shared_config,index,crypto} (Phases 0–4)
+  integration/           two_machines.sh, conflict.sh, shared_config.sh,
+                         doctor.sh, auxiliary_files.sh, nested_roots.sh,
+                         encryption.sh, large_session.sh, gc.sh, interruption.sh
+                         — real casi binary, real
                          (temporary) git repos, `file://` remote, no network
   cli_errors.sh          process-level checks (Phase 0)
 ```
@@ -156,15 +174,22 @@ network, `5` an unmapped root.
 
 ## 4. What's actually verified, and how
 
-- `ctest --preset dev` (ASan+UBSan): **24/24 green** at the Phase 3 closeout.
-  The long `large_session` test was also run independently: it generates an
-  approximately 200 MiB JSONL transcript, corrupts the cached raw-tail offset,
-  appends a short record batch, requires less than 1 MiB of new remote pack
-  data, and verifies a second machine restores the exact bytes. The observed
-  transfer was 168 KiB. The other 23 tests passed separately after it.
-- CI confirmed Phase 3 on Linux/macOS debug and sanitizer jobs, valgrind,
+- The Phase 4 suite is **26/26 green**, split to avoid rerunning the expensive
+  `large_session` test: the other 25 passed under the development preset, and
+  `ctest --test-dir build/dev -R 'large_session$' --output-on-failure` passed
+  independently in 76.34 seconds. `large_session` generates an approximately
+  200 MiB JSONL transcript, corrupts the cached raw-tail offset, appends a
+  short record batch, requires less than 1 MiB of new remote pack data, and
+  verifies a second machine restores the exact bytes. The observed transfer
+  was 168 KiB.
+- CI confirmed Phase 4 on Linux/macOS debug and sanitizer jobs, valgrind,
   vendored libgit2 with the exec SSH transport, GitGuardian, and the required
   `CI` gate.
+- The encrypted two-machine integration test verifies a `0600` keyfile, that
+  a remote exposes neither readable content nor project names, rejection of a
+  join without a copied key (without leaving a stray default key), and that a
+  copied key materializes the transcript, sidecar, and memory under the second
+  machine's layout. It also checks path rewriting in the transcript and memory.
 - Phase 2 integration tests prove shared-exclusion migration and enforcement
   on a new machine, `doctor`'s unmapped-root exit and remediation, subagent and
   memory synchronisation/conflict parking, and the nested-root-to-flat-root
@@ -268,7 +293,7 @@ matters more than the diff.
    now appends a record, pushes it, and reads that record from the remote.
    `casi_fs_git_gc()` also retries `waitpid` when interrupted by `EINTR`.
 
-## 6. Known gaps — Phase 4 baseline
+## 6. Known gaps — Phase 5 baseline
 
 1. **SSH coverage is not autonomous.** The SSH fallback was hardened in PR #3
    and CI exercises the vendored `exec` transport, but PLAN.md's local-`sshd`
@@ -277,18 +302,21 @@ matters more than the diff.
    synthetic 200 MiB transfer bound are automated, but the original plan's
    explicit `casi status` sub-second measurement on the real 390 MB dataset
    has not yet been repeated and captured as evidence.
+3. **libsodium is still external at runtime.** The static preset vendors
+   libgit2 but deliberately keeps libsodium as a system dependency; Phase 5
+   distribution work needs to package it with release artifacts.
 
-Deliberately later: opt-in encryption (Phase 4), distribution (Phase 5),
-deletions (Phase 6), Windows (Phase 7), and a second provider (Phase 8).
+Deliberately later: distribution (Phase 5), deletions (Phase 6), Windows
+(Phase 7), and a second provider (Phase 8).
 
-## 7. Phase 3 closeout evidence
+## 7. Phase 4 closeout evidence
 
-- [x] Define and document the stat-cache record/invalidation contract without
-      changing the chunk-prefix rule.
-- [x] Add `large_session`, use it to drive append-tail rescanning, and enforce
-      a sub-1 MiB remote-pack delta for a short append.
-- [x] Deliver `casi conflicts`, GC/repack, and interruption coverage in the
-      same Phase 3 PR.
-- [x] Run the 24-test local suite, resolve an independent local review, verify
-      the full CI matrix and final `CI` gate, then squash-merge PR #7 with
-      Franco's authorization.
+- [x] Define local-key lifecycle and reject unsafe migration of an existing
+      remote without a copied key.
+- [x] Encrypt content deterministically, conceal remote path names, and retain
+      a minimal clear configuration header for safe joins.
+- [x] Authenticate the session chunk manifest and every auxiliary asset's
+      scope; keep cache domains separate by key identity.
+- [x] Run the 26-test local suite including `large_session`, resolve the
+      independent local review findings, verify the full CI matrix and final
+      `CI` gate, then squash-merge PR #9 with Franco's authorization.
