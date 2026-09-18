@@ -77,6 +77,46 @@ removes the performance win. Claude Code's observed transcript writer is
 append-only, while ordinary rewrites with the same or smaller size continue to
 fall back to a full scan and reach the normal prefix-conflict logic.
 
+## Encryption is opt-in and fixes a remote's format from its first writer
+
+An encrypted store starts with `casi init --remote <url> --encrypt`. It creates
+32 random bytes in a local `0600` keyfile (or uses the explicit `--keyfile`),
+and never puts that key in Git. A later machine must receive that key through a
+separate user-controlled channel and pass `--encrypt` when it initialises. casi
+does not convert a remote that already has casi data: changing its object and
+tree format in place would make an interrupted migration ambiguous and could
+silently mix protected and unprotected history.
+
+The remote configuration retains only a small cleartext format-2 header with
+the mode and a non-secret keyed identifier. It tells a joining client which
+format it is looking at and detects the wrong key; the roots and exclusion
+payload stays encrypted. A client that has not copied a key is rejected before
+it can create a random default keyfile, including when configuration exists
+before the first session branch.
+
+Content uses libsodium's deterministic XChaCha20-Poly1305 construction. Its
+nonce is derived from the normalized plaintext with a separately derived key,
+so identical chunks produce identical Git blobs: Git deduplication and the
+append-prefix rule keep their existing meaning. Subkeys for content, nonce and
+tree paths are derived independently from the local master key. Every logical
+tree component is an HMAC-SHA256 hex value, so a keyless clone cannot recover
+project IDs, session IDs, auxiliary names or the layout vocabulary.
+
+The tree itself is authenticated as well as hidden. Encrypted session metadata
+contains the ordered chunk OIDs and a reader rejects any tree entry that does
+not match that encrypted manifest. Auxiliary blobs contain their filename and
+their kind/project/session scope inside the encrypted wrapper; both the opaque
+leaf name and that scope are verified on read. Thus a valid ciphertext cannot
+be transplanted from another transcript, project, or sidecar location merely
+by rewriting a Git tree.
+
+This protects confidentiality and detects content/tree substitution by someone
+who can alter the remote, but it does not try to solve Git history rollback: a
+writer who can move refs back to a previously valid encrypted commit can still
+replay that old snapshot. The local stat cache includes the crypto key ID in
+its cache domain, preventing OIDs encrypted under an old key from being reused
+after a local key change.
+
 ## Interrupted commands leave retryable state
 
 casi does not offer a cross-file transaction for a pull: interrupting a pull
