@@ -6,6 +6,28 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int load_crypto(casi_ctx *ctx, casi_buf *value)
+{
+    int rc;
+
+    casi_buf_clear(value);
+    rc = casi_config_get_string(ctx->cfg, "crypto.mode", value);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        return CASI_OK;
+    }
+    if (rc != CASI_OK)
+        return rc;
+    if (strcmp(casi_buf_cstr(value), CASI_CRYPTO_MODE_CONVERGENT) != 0)
+        return casi_error_set(CASI_EINVAL, "unsupported crypto.mode: %s",
+                              casi_buf_cstr(value));
+    casi_buf_clear(value);
+    if ((rc = casi_config_get_string(ctx->cfg, "crypto.keyfile", value)) != CASI_OK)
+        return casi_error_set(CASI_EINVAL,
+                              "crypto.mode is set but crypto.keyfile is missing");
+    return casi_crypto_load_key_file(casi_buf_cstr(value), &ctx->crypto);
+}
+
 int casi_ctx_open(casi_ctx *ctx)
 {
     casi_buf value = CASI_BUF_INIT;
@@ -33,6 +55,9 @@ int casi_ctx_open(casi_ctx *ctx)
     if ((rc = casi_roots_load(ctx->roots, ctx->cfg)) != CASI_OK)
         goto fail;
 
+    if ((rc = load_crypto(ctx, &value)) != CASI_OK)
+        goto fail;
+
     /* One provider today; the config key exists so a second one slots in
      * without changing how commands are invoked. */
     casi_buf_clear(&value);
@@ -50,6 +75,7 @@ int casi_ctx_open(casi_ctx *ctx)
 
     if ((rc = casi_repo_open(&ctx->repo)) != CASI_OK)
         goto fail;
+    casi_repo_set_crypto(ctx->repo, &ctx->crypto);
 
     casi_buf_dispose(&value);
     return CASI_OK;
@@ -65,6 +91,7 @@ void casi_ctx_dispose(casi_ctx *ctx)
     casi_repo_free(ctx->repo);
     casi_roots_free(ctx->roots);
     casi_config_free(ctx->cfg);
+    casi_crypto_dispose(&ctx->crypto);
     free(ctx->machine);
     memset(ctx, 0, sizeof(*ctx));
 }
@@ -82,7 +109,7 @@ int casi_ctx_exclude_list(const casi_ctx *ctx, casi_strvec *out)
     size_t i;
     int rc;
 
-    if ((rc = casi_shared_config_load_remote(ctx->repo, &shared, &present)) != CASI_OK)
+    if ((rc = casi_shared_config_load_remote(ctx->repo, &ctx->crypto, &shared, &present)) != CASI_OK)
         goto done;
 
     if (!present) {
@@ -129,7 +156,8 @@ int casi_ctx_publish_shared_config(casi_ctx *ctx)
 
         if ((rc = casi_repo_fetch(ctx->repo)) != CASI_OK)
             goto done;
-        if ((rc = casi_shared_config_load_remote(ctx->repo, &shared, &present)) != CASI_OK)
+        if ((rc = casi_shared_config_load_remote(ctx->repo, &ctx->crypto,
+                                                  &shared, &present)) != CASI_OK)
             goto done;
 
         /* The old local-only list must be brought across before the first
@@ -142,7 +170,8 @@ int casi_ctx_publish_shared_config(casi_ctx *ctx)
         if (rc == CASI_OK)
             rc = add_local_root_names(ctx, &shared);
         if (rc == CASI_OK)
-            rc = casi_shared_config_commit_push(ctx->repo, &shared, ctx->machine);
+            rc = casi_shared_config_commit_push(ctx->repo, &shared, &ctx->crypto,
+                                                 ctx->machine);
 
 done:
         casi_strvec_dispose(&legacy);

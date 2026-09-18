@@ -86,6 +86,12 @@ else()
     add_library(casi::libgit2 ALIAS PkgConfig::LIBGIT2)
 endif()
 
+# -------------------------------------------------------------- libsodium ---
+# Phase 4 encrypts remote content with the portable XChaCha20-Poly1305 AEAD
+# implementation from libsodium.  1.0.12 introduced that construction.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.12)
+
 # ------------------------------------------------------------- core library --
 # Everything except main() lives here so the tests can link it directly.
 add_library(casi_core STATIC
@@ -98,6 +104,7 @@ add_library(casi_core STATIC
     src/util/paths.c
     src/util/config.c
     src/util/jsonl.c
+    src/core/crypto.c
     src/path/encoding.c
     src/path/roots.c
     src/core/chunk.c
@@ -116,7 +123,7 @@ target_include_directories(casi_core
             ${CMAKE_CURRENT_BINARY_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(casi_core PUBLIC casi::libgit2)
+target_link_libraries(casi_core PUBLIC casi::libgit2 PkgConfig::SODIUM)
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.h.in

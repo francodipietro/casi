@@ -58,11 +58,12 @@ Your sessions are yours. casi has no server, no account and no telemetry.
 
 ## Building from source
 
-Requires a C11 compiler, CMake ≥ 3.20, pkg-config and libgit2 ≥ 1.7.
+Requires a C11 compiler, CMake ≥ 3.20, pkg-config, libgit2 ≥ 1.7 and
+libsodium ≥ 1.0.12.
 
 ```sh
-brew install cmake pkg-config libgit2        # macOS
-sudo apt install cmake pkg-config libgit2-dev # Debian/Ubuntu
+brew install cmake pkg-config libgit2 libsodium             # macOS
+sudo apt install cmake pkg-config libgit2-dev libsodium-dev # Debian/Ubuntu
 
 cmake --preset release
 cmake --build --preset release
@@ -76,9 +77,10 @@ cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 ```
 
 `--preset static` vendors libgit2 and builds it with the OpenSSH `exec`
-transport, producing a binary with no non-system dynamic dependencies. Reach for
-it if your distro's libgit2 links libssh2 and you need `~/.ssh/config` host
-aliases to resolve — `casi --version` tells you which backend you have.
+transport. libsodium remains a system dependency until Phase 5 packages it
+with the release artifact. Reach for it if your distro's libgit2 links libssh2
+and you need `~/.ssh/config` host aliases to resolve — `casi --version` tells
+you which backend you have.
 
 That preset produces an artifact to copy, not one to `cmake --install`: libgit2's
 own install rules come along with it and would drop its headers and static

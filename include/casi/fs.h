@@ -53,6 +53,11 @@ int  casi_fs_realpath(const char *path, casi_buf *out);
  * casi never leaves a half-written session on disk. Creates parent dirs.
  */
 int  casi_fs_write_file_atomic(const char *path, const void *data, size_t len);
+/* Same atomic replacement, but the resulting file is readable only by its
+ * owner. Used exclusively for locally held cryptographic keys. */
+int  casi_fs_write_file_atomic_private(const char *path, const void *data, size_t len);
+/* Reads a regular file only when group/other permissions are absent. */
+int  casi_fs_read_file_private(const char *path, casi_buf *out);
 int  casi_fs_rename_replace(const char *from, const char *to);
 /* Creates a symbolic link at `path` pointing to `target`. */
 int  casi_fs_symlink(const char *target, const char *path);

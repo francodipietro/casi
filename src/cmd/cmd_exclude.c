@@ -52,7 +52,8 @@ static int run(int argc, char **argv, bool excluding)
 
             if ((rc = casi_repo_fetch(ctx.repo)) != CASI_OK)
                 goto update_done;
-            if ((rc = casi_shared_config_load_remote(ctx.repo, &shared, &present)) != CASI_OK)
+            if ((rc = casi_shared_config_load_remote(ctx.repo, &ctx.crypto,
+                                                      &shared, &present)) != CASI_OK)
                 goto update_done;
 
             /* Upgrade local-only exclusions as one atomic first shared write.
@@ -77,7 +78,8 @@ static int run(int argc, char **argv, bool excluding)
                 rc = CASI_OK;
             }
             if (rc == CASI_OK)
-                rc = casi_shared_config_commit_push(ctx.repo, &shared, ctx.machine);
+                rc = casi_shared_config_commit_push(ctx.repo, &shared, &ctx.crypto,
+                                                     ctx.machine);
 
 update_done:
             casi_shared_config_dispose(&shared);

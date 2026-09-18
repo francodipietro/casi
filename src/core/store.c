@@ -142,29 +142,89 @@ casi_asset *casi_asset_list_find(casi_asset_list *list, casi_aux_kind kind,
 
 /* --- paths within the tree -------------------------------------------- */
 
-static int session_dir(casi_buf *out, const char *provider, const casi_entry *e)
+static int path_append_component(casi_repo *repo, casi_buf *out, const char *component)
 {
-    casi_buf_clear(out);
-    return casi_buf_printf(out, "sessions/%s/%s/%s",
-                           provider, e->project_id, e->session_id);
+    casi_buf physical = CASI_BUF_INIT;
+    int rc;
+
+    if ((rc = casi_repo_path_component(repo, component, &physical)) != CASI_OK)
+        goto done;
+    if (out->len > 0 && (rc = casi_buf_putc(out, '/')) != CASI_OK)
+        goto done;
+    rc = casi_buf_put(out, physical.ptr, physical.len);
+
+done:
+    casi_buf_dispose(&physical);
+    return rc;
 }
 
-static int chunk_path(casi_buf *out, const char *dir, size_t index)
+static int session_dir(casi_repo *repo, casi_buf *out, const char *provider,
+                       const casi_entry *e)
 {
+    int rc;
+
     casi_buf_clear(out);
-    /* Fixed width so the tree sorts in chunk order, which is also read order. */
-    return casi_buf_printf(out, "%s/chunks/%06zu", dir, index);
+    if ((rc = path_append_component(repo, out, "sessions")) != CASI_OK ||
+        (rc = path_append_component(repo, out, provider)) != CASI_OK ||
+        (rc = path_append_component(repo, out, e->project_id)) != CASI_OK ||
+        (rc = path_append_component(repo, out, e->session_id)) != CASI_OK)
+        return rc;
+    return CASI_OK;
 }
 
-static int asset_path(casi_buf *out, const char *provider, const casi_asset *asset)
+static int project_dir(casi_repo *repo, casi_buf *out, const char *provider,
+                       const char *project_id)
 {
+    int rc;
+
     casi_buf_clear(out);
-    if (asset->kind == CASI_AUX_SUBAGENT)
-        return casi_buf_printf(out, "sessions/%s/%s/%s/subagents/%s", provider,
-                               asset->project_id, asset->session_id, asset->name);
-    if (asset->kind == CASI_AUX_MEMORY)
-        return casi_buf_printf(out, "projects/%s/%s/memory/%s", provider,
-                               asset->project_id, asset->name);
+    if ((rc = path_append_component(repo, out, "projects")) != CASI_OK ||
+        (rc = path_append_component(repo, out, provider)) != CASI_OK ||
+        (rc = path_append_component(repo, out, project_id)) != CASI_OK)
+        return rc;
+    return CASI_OK;
+}
+
+static int chunk_path(casi_repo *repo, casi_buf *out, const char *dir, size_t index)
+{
+    casi_buf number = CASI_BUF_INIT;
+    int rc;
+
+    casi_buf_clear(out);
+    if ((rc = casi_buf_puts(out, dir)) != CASI_OK ||
+        (rc = path_append_component(repo, out, "chunks")) != CASI_OK ||
+        (rc = casi_buf_printf(&number, "%06zu", index)) != CASI_OK ||
+        (rc = path_append_component(repo, out, casi_buf_cstr(&number))) != CASI_OK)
+        goto done;
+    rc = CASI_OK;
+
+done:
+    casi_buf_dispose(&number);
+    return rc;
+}
+
+static int asset_path(casi_repo *repo, casi_buf *out, const char *provider,
+                      const casi_asset *asset)
+{
+    casi_entry session = { 0 };
+    int rc;
+
+    if (asset->kind == CASI_AUX_SUBAGENT) {
+        session.project_id = asset->project_id;
+        session.session_id = asset->session_id;
+        if ((rc = session_dir(repo, out, provider, &session)) != CASI_OK ||
+            (rc = path_append_component(repo, out, "subagents")) != CASI_OK ||
+            (rc = path_append_component(repo, out, asset->name)) != CASI_OK)
+            return rc;
+        return CASI_OK;
+    }
+    if (asset->kind == CASI_AUX_MEMORY) {
+        if ((rc = project_dir(repo, out, provider, asset->project_id)) != CASI_OK ||
+            (rc = path_append_component(repo, out, "memory")) != CASI_OK ||
+            (rc = path_append_component(repo, out, asset->name)) != CASI_OK)
+            return rc;
+        return CASI_OK;
+    }
     return casi_error_set(CASI_EINVAL, "unknown auxiliary file kind");
 }
 
@@ -178,6 +238,103 @@ static bool project_meta_already_written(const casi_asset_list *assets, size_t e
             strcmp(assets->items[i].project_id, asset->project_id) == 0)
             return true;
     return false;
+}
+
+#define CASI_ASSET_MAGIC "CASIAS1"
+#define CASI_ASSET_MAGIC_LEN (sizeof(CASI_ASSET_MAGIC) - 1)
+
+/* An encrypted auxiliary leaf needs to carry its original name: that name is
+ * itself an HMAC tree component and therefore cannot be recovered by listing
+ * the tree. The wrapper is inside the ordinary encrypted blob. */
+static int asset_scope(casi_aux_kind kind, const char *project_id,
+                       const char *session_id, casi_buf *out)
+{
+    casi_buf_clear(out);
+    return casi_buf_printf(out, "%d\n%s\n%s", (int)kind, project_id,
+                           session_id != NULL ? session_id : "");
+}
+
+static int asset_wrap(const casi_aux_file *file, const casi_buf *content, casi_buf *out)
+{
+    casi_buf scope = CASI_BUF_INIT;
+    size_t name_len = strlen(file->name);
+    unsigned char lengths[8];
+    int rc;
+
+    if ((rc = asset_scope(file->kind, file->project_id, file->session_id, &scope)) != CASI_OK)
+        goto done;
+    if (name_len > UINT32_MAX || scope.len > UINT32_MAX) {
+        rc = casi_error_set(CASI_EINVAL, "auxiliary filename is too long");
+        goto done;
+    }
+    lengths[0] = (unsigned char)scope.len;
+    lengths[1] = (unsigned char)(scope.len >> 8);
+    lengths[2] = (unsigned char)(scope.len >> 16);
+    lengths[3] = (unsigned char)(scope.len >> 24);
+    lengths[4] = (unsigned char)name_len;
+    lengths[5] = (unsigned char)(name_len >> 8);
+    lengths[6] = (unsigned char)(name_len >> 16);
+    lengths[7] = (unsigned char)(name_len >> 24);
+    casi_buf_clear(out);
+    if ((rc = casi_buf_put(out, CASI_ASSET_MAGIC, CASI_ASSET_MAGIC_LEN)) != CASI_OK ||
+        (rc = casi_buf_put(out, lengths, sizeof(lengths))) != CASI_OK ||
+        (rc = casi_buf_put(out, scope.ptr, scope.len)) != CASI_OK ||
+        (rc = casi_buf_put(out, file->name, name_len)) != CASI_OK ||
+        (rc = casi_buf_put(out, content->ptr, content->len)) != CASI_OK)
+        casi_buf_clear(out);
+done:
+    casi_buf_dispose(&scope);
+    return rc;
+}
+
+static int asset_unwrap(const casi_buf *wrapped, casi_buf *scope, casi_buf *name,
+                        casi_buf *content)
+{
+    const unsigned char *p = (const unsigned char *)wrapped->ptr;
+    size_t offset = CASI_ASSET_MAGIC_LEN + 8, scope_len, name_len;
+    int rc;
+
+    if (wrapped->len < offset || memcmp(p, CASI_ASSET_MAGIC, CASI_ASSET_MAGIC_LEN) != 0)
+        return casi_error_set(CASI_EINVAL, "unsupported encrypted auxiliary format");
+    scope_len = (size_t)p[CASI_ASSET_MAGIC_LEN] |
+                ((size_t)p[CASI_ASSET_MAGIC_LEN + 1] << 8) |
+                ((size_t)p[CASI_ASSET_MAGIC_LEN + 2] << 16) |
+                ((size_t)p[CASI_ASSET_MAGIC_LEN + 3] << 24);
+    name_len = (size_t)p[CASI_ASSET_MAGIC_LEN + 4] |
+               ((size_t)p[CASI_ASSET_MAGIC_LEN + 5] << 8) |
+               ((size_t)p[CASI_ASSET_MAGIC_LEN + 6] << 16) |
+               ((size_t)p[CASI_ASSET_MAGIC_LEN + 7] << 24);
+    if (scope_len > wrapped->len - offset || name_len > wrapped->len - offset - scope_len)
+        return casi_error_set(CASI_EINVAL, "auxiliary filename is too long");
+    casi_buf_clear(scope);
+    casi_buf_clear(name);
+    casi_buf_clear(content);
+    if ((rc = casi_buf_put(scope, p + offset, scope_len)) != CASI_OK ||
+        (rc = casi_buf_put(name, p + offset + scope_len, name_len)) != CASI_OK ||
+        (rc = casi_buf_put(content, p + offset + scope_len + name_len,
+                           wrapped->len - offset - scope_len - name_len)) != CASI_OK)
+        return rc;
+    return rc;
+}
+
+static int append_chunk_oids(casi_buf *out, const git_oid *chunks, size_t count)
+{
+    size_t i;
+    int rc;
+
+    casi_buf_clear(out);
+    if ((rc = casi_buf_putc(out, '[')) != CASI_OK)
+        return rc;
+    for (i = 0; i < count; i++) {
+        char text[GIT_OID_HEXSZ + 1];
+
+        if (i > 0 && (rc = casi_buf_putc(out, ',')) != CASI_OK)
+            return rc;
+        git_oid_tostr(text, sizeof(text), &chunks[i]);
+        if ((rc = casi_buf_printf(out, "\"%s\"", text)) != CASI_OK)
+            return rc;
+    }
+    return casi_buf_putc(out, ']');
 }
 
 /* --- writing ---------------------------------------------------------- */
@@ -477,7 +634,7 @@ done:
 static int scan_one_asset(casi_repo *repo, const casi_roots *roots,
                           const casi_aux_file *file, casi_asset_list *out)
 {
-    casi_buf raw = CASI_BUF_INIT, normalized = CASI_BUF_INIT;
+    casi_buf raw = CASI_BUF_INIT, normalized = CASI_BUF_INIT, wrapped = CASI_BUF_INIT;
     casi_asset asset;
     int rc;
 
@@ -486,8 +643,14 @@ static int scan_one_asset(casi_repo *repo, const casi_roots *roots,
         goto done;
     if ((rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
         goto done;
-    if ((rc = casi_repo_write_blob(repo, normalized.ptr, normalized.len, &asset.oid)) != CASI_OK)
+    if (casi_repo_crypto_enabled(repo)) {
+        if ((rc = asset_wrap(file, &normalized, &wrapped)) != CASI_OK)
+            goto done;
+        if ((rc = casi_repo_write_blob(repo, wrapped.ptr, wrapped.len, &asset.oid)) != CASI_OK)
+            goto done;
+    } else if ((rc = casi_repo_write_blob(repo, normalized.ptr, normalized.len, &asset.oid)) != CASI_OK) {
         goto done;
+    }
 
     asset.kind = file->kind;
     asset.project_path = casi_strdup(file->project_path);
@@ -507,6 +670,7 @@ done:
     asset_dispose(&asset);
     casi_buf_dispose(&raw);
     casi_buf_dispose(&normalized);
+    casi_buf_dispose(&wrapped);
     return rc;
 }
 
@@ -519,6 +683,7 @@ int casi_store_scan_local(casi_repo *repo, const casi_roots *roots,
     casi_session_list sessions;
     casi_aux_file_list aux_files;
     casi_index *index = NULL;
+    casi_buf crypto_key_id = CASI_BUF_INIT;
     size_t i, skipped = 0;
     int rc;
 
@@ -527,7 +692,8 @@ int casi_store_scan_local(casi_repo *repo, const casi_roots *roots,
 
     if ((rc = provider->discover(roots, &sessions, &aux_files)) != CASI_OK)
         goto done;
-    if ((rc = casi_index_open(roots, &index)) != CASI_OK)
+    if ((rc = casi_repo_crypto_key_id(repo, &crypto_key_id)) != CASI_OK ||
+        (rc = casi_index_open(roots, casi_buf_cstr(&crypto_key_id), &index)) != CASI_OK)
         goto done;
 
     for (i = 0; i < sessions.len; i++) {
@@ -557,6 +723,7 @@ done:
     casi_session_list_dispose(&sessions);
     casi_aux_file_list_dispose(&aux_files);
     casi_index_free(index);
+    casi_buf_dispose(&crypto_key_id);
     return rc;
 }
 
@@ -566,7 +733,8 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
 {
     casi_tree *tree = NULL;
     casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT, meta = CASI_BUF_INIT;
-    casi_buf session_json = CASI_BUF_INIT, project_json = CASI_BUF_INIT;
+    casi_buf session_json = CASI_BUF_INIT, project_json = CASI_BUF_INIT,
+             project_id_json = CASI_BUF_INIT, chunk_oids = CASI_BUF_INIT;
     size_t i, c;
     int rc;
 
@@ -576,40 +744,50 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
     casi_buf_clear(&meta);
     if ((rc = casi_buf_printf(&meta, "{\"format\":%d}\n", CASI_FORMAT_VERSION)) != CASI_OK)
         goto done;
-    if ((rc = casi_tree_add_text(tree, "casi.json", casi_buf_cstr(&meta))) != CASI_OK)
+    casi_buf_clear(&path);
+    if ((rc = path_append_component(repo, &path, "casi.json")) != CASI_OK ||
+        (rc = casi_tree_add_text(tree, casi_buf_cstr(&path), casi_buf_cstr(&meta))) != CASI_OK)
         goto done;
 
     for (i = 0; i < entries->len; i++) {
         const casi_entry *e = &entries->items[i];
 
-        if ((rc = session_dir(&dir, provider_name, e)) != CASI_OK)
+        if ((rc = session_dir(repo, &dir, provider_name, e)) != CASI_OK)
             goto done;
 
         if ((rc = casi_json_escape_string(e->session_id, &session_json)) != CASI_OK)
             goto done;
         if ((rc = casi_json_escape_string(e->project_path, &project_json)) != CASI_OK)
             goto done;
+        if ((rc = casi_json_escape_string(e->project_id, &project_id_json)) != CASI_OK)
+            goto done;
+        if ((rc = append_chunk_oids(&chunk_oids, e->chunks, e->chunk_count)) != CASI_OK)
+            goto done;
 
         casi_buf_clear(&meta);
         rc = casi_buf_printf(&meta,
                              "{\"sessionId\":\"%s\","
+                             "\"projectId\":\"%s\","
                              "\"projectPath\":\"%s\","
                              "\"chunks\":%zu,"
+                             "\"chunkOids\":%s,"
                              "\"bytes\":%" PRIu64 "}\n",
-                             casi_buf_cstr(&session_json), casi_buf_cstr(&project_json),
-                             e->chunk_count, e->bytes);
+                             casi_buf_cstr(&session_json), casi_buf_cstr(&project_id_json),
+                             casi_buf_cstr(&project_json),
+                             e->chunk_count, casi_buf_cstr(&chunk_oids), e->bytes);
         if (rc != CASI_OK)
             goto done;
 
         casi_buf_clear(&path);
-        if ((rc = casi_buf_printf(&path, "%s/meta.json", casi_buf_cstr(&dir))) != CASI_OK)
+        if ((rc = casi_buf_puts(&path, casi_buf_cstr(&dir))) != CASI_OK ||
+            (rc = path_append_component(repo, &path, "meta.json")) != CASI_OK)
             goto done;
         if ((rc = casi_tree_add_text(tree, casi_buf_cstr(&path),
                                      casi_buf_cstr(&meta))) != CASI_OK)
             goto done;
 
         for (c = 0; c < e->chunk_count; c++) {
-            if ((rc = chunk_path(&path, casi_buf_cstr(&dir), c)) != CASI_OK)
+            if ((rc = chunk_path(repo, &path, casi_buf_cstr(&dir), c)) != CASI_OK)
                 goto done;
             if ((rc = casi_tree_add(tree, casi_buf_cstr(&path), &e->chunks[c])) != CASI_OK)
                 goto done;
@@ -623,12 +801,13 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
             !project_meta_already_written(assets, i, asset)) {
             if ((rc = casi_json_escape_string(asset->project_path, &project_json)) != CASI_OK)
                 goto done;
-            casi_buf_clear(&path);
-            if ((rc = casi_buf_printf(&path, "projects/%s/%s/meta.json", provider_name,
-                                      asset->project_id)) != CASI_OK)
+            if ((rc = project_dir(repo, &path, provider_name, asset->project_id)) != CASI_OK ||
+                (rc = path_append_component(repo, &path, "meta.json")) != CASI_OK)
                 goto done;
             casi_buf_clear(&meta);
-            if ((rc = casi_buf_printf(&meta, "{\"projectPath\":\"%s\"}\n",
+            if ((rc = casi_json_escape_string(asset->project_id, &project_id_json)) != CASI_OK ||
+                (rc = casi_buf_printf(&meta, "{\"projectId\":\"%s\",\"projectPath\":\"%s\"}\n",
+                                      casi_buf_cstr(&project_id_json),
                                       casi_buf_cstr(&project_json))) != CASI_OK)
                 goto done;
             if ((rc = casi_tree_add_text(tree, casi_buf_cstr(&path),
@@ -636,7 +815,7 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
                 goto done;
         }
 
-        if ((rc = asset_path(&path, provider_name, asset)) != CASI_OK)
+        if ((rc = asset_path(repo, &path, provider_name, asset)) != CASI_OK)
             goto done;
         if ((rc = casi_tree_add(tree, casi_buf_cstr(&path), &asset->oid)) != CASI_OK)
             goto done;
@@ -651,10 +830,343 @@ done:
     casi_buf_dispose(&meta);
     casi_buf_dispose(&session_json);
     casi_buf_dispose(&project_json);
+    casi_buf_dispose(&project_id_json);
+    casi_buf_dispose(&chunk_oids);
     return rc;
 }
 
 /* --- reading ---------------------------------------------------------- */
+
+static int path_append_physical(casi_buf *out, const char *component)
+{
+    if (out->len > 0 && casi_buf_putc(out, '/') != CASI_OK)
+        return casi_error_last_code();
+    return casi_buf_puts(out, component);
+}
+
+static int path_component_matches(casi_repo *repo, const char *logical,
+                                  const char *physical)
+{
+    casi_buf expected = CASI_BUF_INIT;
+    int rc;
+
+    if ((rc = casi_repo_path_component(repo, logical, &expected)) != CASI_OK)
+        goto done;
+    if (strcmp(casi_buf_cstr(&expected), physical) != 0)
+        rc = casi_error_set(CASI_EINVAL, "encrypted tree path does not match its metadata");
+
+done:
+    casi_buf_dispose(&expected);
+    return rc;
+}
+
+static int encrypted_session_dir(casi_repo *repo, casi_buf *out,
+                                 const char *provider, const char *project_dir,
+                                 const char *session_dir_name)
+{
+    int rc;
+
+    casi_buf_clear(out);
+    if ((rc = path_append_component(repo, out, "sessions")) != CASI_OK ||
+        (rc = path_append_component(repo, out, provider)) != CASI_OK ||
+        (rc = path_append_physical(out, project_dir)) != CASI_OK ||
+        (rc = path_append_physical(out, session_dir_name)) != CASI_OK)
+        return rc;
+    return CASI_OK;
+}
+
+static int encrypted_project_dir(casi_repo *repo, casi_buf *out,
+                                 const char *provider, const char *project_dir)
+{
+    int rc;
+
+    casi_buf_clear(out);
+    if ((rc = path_append_component(repo, out, "projects")) != CASI_OK ||
+        (rc = path_append_component(repo, out, provider)) != CASI_OK ||
+        (rc = path_append_physical(out, project_dir)) != CASI_OK)
+        return rc;
+    return CASI_OK;
+}
+
+static int encrypted_asset_from_path(casi_repo *repo, const git_oid *tree,
+                                     const char *path, const char *physical_name,
+                                     casi_aux_kind kind, const char *project_path,
+                                     const char *project_id, const char *session_id,
+                                     casi_asset_list *assets_out)
+{
+    casi_buf wrapped = CASI_BUF_INIT, scope = CASI_BUF_INIT, name = CASI_BUF_INIT,
+             content = CASI_BUF_INIT, expected_scope = CASI_BUF_INIT;
+    casi_asset asset;
+    int rc;
+
+    memset(&asset, 0, sizeof(asset));
+    if ((rc = casi_repo_tree_entry_oid(repo, tree, path, &asset.oid)) != CASI_OK ||
+        (rc = casi_repo_read_blob(repo, &asset.oid, &wrapped)) != CASI_OK ||
+        (rc = asset_unwrap(&wrapped, &scope, &name, &content)) != CASI_OK ||
+        (rc = asset_scope(kind, project_id, session_id, &expected_scope)) != CASI_OK ||
+        (rc = path_component_matches(repo, casi_buf_cstr(&name), physical_name)) != CASI_OK)
+        goto done;
+    if (strcmp(casi_buf_cstr(&scope), casi_buf_cstr(&expected_scope)) != 0) {
+        rc = casi_error_set(CASI_EINVAL, "encrypted auxiliary does not match its tree scope");
+        goto done;
+    }
+    asset.kind = kind;
+    asset.project_path = casi_strdup(project_path);
+    asset.project_id = casi_strdup(project_id);
+    asset.session_id = session_id != NULL ? casi_strdup(session_id) : NULL;
+    asset.name = casi_strdup(casi_buf_cstr(&name));
+    asset.bytes = content.len;
+    if (asset.project_path == NULL || asset.project_id == NULL || asset.name == NULL ||
+        (session_id != NULL && asset.session_id == NULL)) {
+        rc = casi_error_set(CASI_ENOMEM, "out of memory reading encrypted auxiliary metadata");
+        goto done;
+    }
+    rc = casi_asset_list_push_owned(assets_out, &asset);
+
+done:
+    asset_dispose(&asset);
+    casi_buf_dispose(&wrapped);
+    casi_buf_dispose(&scope);
+    casi_buf_dispose(&name);
+    casi_buf_dispose(&content);
+    casi_buf_dispose(&expected_scope);
+    return rc;
+}
+
+static int read_encrypted_session_entry(casi_repo *repo, const git_oid *tree,
+                                        const char *provider_name,
+                                        const char *physical_project,
+                                        const char *physical_session,
+                                        casi_entry_list *out,
+                                        casi_asset_list *assets_out)
+{
+    casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT, meta = CASI_BUF_INIT;
+    casi_buf project_id = CASI_BUF_INIT, session_id = CASI_BUF_INIT,
+             project_path = CASI_BUF_INIT, number = CASI_BUF_INIT;
+    casi_strvec asset_names = CASI_STRVEC_INIT, chunk_oids = CASI_STRVEC_INIT;
+    casi_entry entry;
+    uint64_t chunk_count;
+    size_t i;
+    int rc;
+
+    memset(&entry, 0, sizeof(entry));
+    if ((rc = encrypted_session_dir(repo, &dir, provider_name, physical_project,
+                                    physical_session)) != CASI_OK ||
+        (rc = casi_buf_put(&path, dir.ptr, dir.len)) != CASI_OK ||
+        (rc = path_append_component(repo, &path, "meta.json")) != CASI_OK ||
+        (rc = casi_repo_tree_entry_blob(repo, tree, casi_buf_cstr(&path), &meta)) != CASI_OK)
+        goto done;
+    if (!casi_json_find_string(meta.ptr, meta.len, "sessionId", &session_id) ||
+        !casi_json_find_string(meta.ptr, meta.len, "projectId", &project_id) ||
+        !casi_json_find_string(meta.ptr, meta.len, "projectPath", &project_path) ||
+        !casi_json_has_key(meta.ptr, meta.len, "chunks") ||
+        !casi_json_find_string_array(meta.ptr, meta.len, "chunkOids", &chunk_oids)) {
+        rc = casi_error_set(CASI_EINVAL, "malformed encrypted session metadata");
+        goto done;
+    }
+    chunk_count = casi_json_find_uint(meta.ptr, meta.len, "chunks");
+    if (chunk_count > SIZE_MAX || chunk_oids.len != (size_t)chunk_count ||
+        (rc = path_component_matches(repo, casi_buf_cstr(&project_id), physical_project)) != CASI_OK ||
+        (rc = path_component_matches(repo, casi_buf_cstr(&session_id), physical_session)) != CASI_OK)
+        goto done;
+
+    entry.session_id = casi_strdup(casi_buf_cstr(&session_id));
+    entry.project_id = casi_strdup(casi_buf_cstr(&project_id));
+    entry.project_path = casi_strdup(casi_buf_cstr(&project_path));
+    entry.bytes = casi_json_find_uint(meta.ptr, meta.len, "bytes");
+    entry.chunk_count = (size_t)chunk_count;
+    if (entry.session_id == NULL || entry.project_id == NULL || entry.project_path == NULL) {
+        rc = casi_error_set(CASI_ENOMEM, "out of memory reading encrypted session metadata");
+        goto done;
+    }
+    if (entry.chunk_count > 0) {
+        entry.chunks = calloc(entry.chunk_count, sizeof(*entry.chunks));
+        if (entry.chunks == NULL) {
+            rc = casi_error_set(CASI_ENOMEM, "out of memory reading encrypted chunks");
+            goto done;
+        }
+    }
+    for (i = 0; i < entry.chunk_count; i++) {
+        casi_buf_clear(&path);
+        casi_buf_clear(&number);
+        if ((rc = casi_buf_put(&path, dir.ptr, dir.len)) != CASI_OK ||
+            (rc = path_append_component(repo, &path, "chunks")) != CASI_OK ||
+            (rc = casi_buf_printf(&number, "%06zu", i)) != CASI_OK ||
+            (rc = path_append_component(repo, &path, casi_buf_cstr(&number))) != CASI_OK ||
+            (rc = casi_repo_tree_entry_oid(repo, tree, casi_buf_cstr(&path),
+                                           &entry.chunks[i])) != CASI_OK)
+            goto done;
+        {
+            git_oid expected;
+
+            if (git_oid_fromstr(&expected, chunk_oids.items[i]) != 0 ||
+                !git_oid_equal(&expected, &entry.chunks[i])) {
+                rc = casi_error_set(CASI_EINVAL,
+                                    "encrypted chunk does not match its authenticated manifest");
+                goto done;
+            }
+        }
+    }
+    if ((rc = entry_list_push(out, &entry)) != CASI_OK)
+        goto done;
+    memset(&entry, 0, sizeof(entry));
+
+    casi_buf_clear(&path);
+    if ((rc = casi_buf_put(&path, dir.ptr, dir.len)) != CASI_OK ||
+        (rc = path_append_component(repo, &path, "subagents")) != CASI_OK)
+        goto done;
+    rc = casi_repo_tree_list(repo, tree, casi_buf_cstr(&path), &asset_names);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        rc = CASI_OK;
+    } else if (rc == CASI_OK) {
+        for (i = 0; i < asset_names.len; i++) {
+            if ((rc = casi_buf_putc(&path, '/')) != CASI_OK ||
+                (rc = casi_buf_puts(&path, asset_names.items[i])) != CASI_OK ||
+                (rc = encrypted_asset_from_path(repo, tree, casi_buf_cstr(&path),
+                                                asset_names.items[i], CASI_AUX_SUBAGENT,
+                                                casi_buf_cstr(&project_path),
+                                                casi_buf_cstr(&project_id),
+                                                casi_buf_cstr(&session_id), assets_out)) != CASI_OK)
+                goto done;
+            casi_buf_clear(&path);
+            if ((rc = casi_buf_put(&path, dir.ptr, dir.len)) != CASI_OK ||
+                (rc = path_append_component(repo, &path, "subagents")) != CASI_OK)
+                goto done;
+        }
+    }
+
+done:
+    entry_dispose(&entry);
+    casi_strvec_dispose(&asset_names);
+    casi_strvec_dispose(&chunk_oids);
+    casi_buf_dispose(&dir);
+    casi_buf_dispose(&path);
+    casi_buf_dispose(&meta);
+    casi_buf_dispose(&project_id);
+    casi_buf_dispose(&session_id);
+    casi_buf_dispose(&project_path);
+    casi_buf_dispose(&number);
+    return rc;
+}
+
+static int read_encrypted_project_assets(casi_repo *repo, const git_oid *tree,
+                                         const char *provider_name,
+                                         const char *physical_project,
+                                         casi_asset_list *assets_out)
+{
+    casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT, meta = CASI_BUF_INIT;
+    casi_buf project_id = CASI_BUF_INIT, project_path = CASI_BUF_INIT;
+    casi_strvec names = CASI_STRVEC_INIT;
+    size_t i;
+    int rc;
+
+    if ((rc = encrypted_project_dir(repo, &dir, provider_name, physical_project)) != CASI_OK ||
+        (rc = casi_buf_put(&path, dir.ptr, dir.len)) != CASI_OK ||
+        (rc = path_append_component(repo, &path, "meta.json")) != CASI_OK ||
+        (rc = casi_repo_tree_entry_blob(repo, tree, casi_buf_cstr(&path), &meta)) != CASI_OK)
+        goto done;
+    if (!casi_json_find_string(meta.ptr, meta.len, "projectId", &project_id) ||
+        !casi_json_find_string(meta.ptr, meta.len, "projectPath", &project_path) ||
+        (rc = path_component_matches(repo, casi_buf_cstr(&project_id), physical_project)) != CASI_OK)
+        goto done;
+
+    casi_buf_clear(&path);
+    if ((rc = casi_buf_put(&path, dir.ptr, dir.len)) != CASI_OK ||
+        (rc = path_append_component(repo, &path, "memory")) != CASI_OK)
+        goto done;
+    rc = casi_repo_tree_list(repo, tree, casi_buf_cstr(&path), &names);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        rc = CASI_OK;
+        goto done;
+    }
+    if (rc != CASI_OK)
+        goto done;
+    for (i = 0; i < names.len; i++) {
+        if ((rc = casi_buf_putc(&path, '/')) != CASI_OK ||
+            (rc = casi_buf_puts(&path, names.items[i])) != CASI_OK ||
+            (rc = encrypted_asset_from_path(repo, tree, casi_buf_cstr(&path), names.items[i],
+                                            CASI_AUX_MEMORY, casi_buf_cstr(&project_path),
+                                            casi_buf_cstr(&project_id), NULL, assets_out)) != CASI_OK)
+            goto done;
+        casi_buf_clear(&path);
+        if ((rc = casi_buf_put(&path, dir.ptr, dir.len)) != CASI_OK ||
+            (rc = path_append_component(repo, &path, "memory")) != CASI_OK)
+            goto done;
+    }
+
+    rc = CASI_OK;
+done:
+    casi_strvec_dispose(&names);
+    casi_buf_dispose(&dir);
+    casi_buf_dispose(&path);
+    casi_buf_dispose(&meta);
+    casi_buf_dispose(&project_id);
+    casi_buf_dispose(&project_path);
+    return rc;
+}
+
+static int read_encrypted_tree(casi_repo *repo, const git_oid *tree,
+                               const char *provider_name, casi_entry_list *out,
+                               casi_asset_list *assets_out)
+{
+    casi_buf path = CASI_BUF_INIT;
+    casi_strvec projects = CASI_STRVEC_INIT, sessions = CASI_STRVEC_INIT,
+                memory_projects = CASI_STRVEC_INIT;
+    size_t i, j;
+    int rc;
+
+    if ((rc = path_append_component(repo, &path, "sessions")) != CASI_OK ||
+        (rc = path_append_component(repo, &path, provider_name)) != CASI_OK)
+        goto done;
+    rc = casi_repo_tree_list(repo, tree, casi_buf_cstr(&path), &projects);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        rc = CASI_OK;
+    } else if (rc != CASI_OK) {
+        goto done;
+    }
+    for (i = 0; i < projects.len; i++) {
+        casi_strvec_dispose(&sessions);
+        memset(&sessions, 0, sizeof(sessions));
+        casi_buf_clear(&path);
+        if ((rc = path_append_component(repo, &path, "sessions")) != CASI_OK ||
+            (rc = path_append_component(repo, &path, provider_name)) != CASI_OK ||
+            (rc = path_append_physical(&path, projects.items[i])) != CASI_OK ||
+            (rc = casi_repo_tree_list(repo, tree, casi_buf_cstr(&path), &sessions)) != CASI_OK)
+            goto done;
+        for (j = 0; j < sessions.len; j++)
+            if ((rc = read_encrypted_session_entry(repo, tree, provider_name,
+                                                   projects.items[i], sessions.items[j],
+                                                   out, assets_out)) != CASI_OK)
+                goto done;
+    }
+
+    casi_buf_clear(&path);
+    if ((rc = path_append_component(repo, &path, "projects")) != CASI_OK ||
+        (rc = path_append_component(repo, &path, provider_name)) != CASI_OK)
+        goto done;
+    rc = casi_repo_tree_list(repo, tree, casi_buf_cstr(&path), &memory_projects);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        rc = CASI_OK;
+    } else if (rc != CASI_OK) {
+        goto done;
+    }
+    for (i = 0; i < memory_projects.len; i++)
+        if ((rc = read_encrypted_project_assets(repo, tree, provider_name,
+                                                memory_projects.items[i], assets_out)) != CASI_OK)
+            goto done;
+
+    rc = CASI_OK;
+done:
+    casi_strvec_dispose(&projects);
+    casi_strvec_dispose(&sessions);
+    casi_strvec_dispose(&memory_projects);
+    casi_buf_dispose(&path);
+    return rc;
+}
 
 static int read_session_entry(casi_repo *repo, const git_oid *tree,
                               const char *provider_name, const char *project_id,
@@ -852,6 +1364,9 @@ int casi_store_read_tree(casi_repo *repo, const git_oid *tree,
     size_t i, j;
     int rc;
 
+    if (casi_repo_crypto_enabled(repo))
+        return read_encrypted_tree(repo, tree, provider_name, out, assets_out);
+
     if ((rc = casi_buf_printf(&path, "sessions/%s", provider_name)) != CASI_OK)
         goto done;
 
@@ -979,18 +1494,37 @@ int casi_store_materialize_asset_to(casi_repo *repo, const casi_roots *roots,
                                     const casi_asset *asset, const char *path,
                                     casi_buf *unmapped_out)
 {
-    casi_buf normalized = CASI_BUF_INIT, local = CASI_BUF_INIT;
+    casi_buf normalized = CASI_BUF_INIT, content = CASI_BUF_INIT, scope = CASI_BUF_INIT,
+             expected_scope = CASI_BUF_INIT, name = CASI_BUF_INIT, local = CASI_BUF_INIT;
     int rc;
 
     if ((rc = casi_repo_read_blob(repo, &asset->oid, &normalized)) != CASI_OK)
         goto done;
-    if ((rc = casi_roots_denormalize_text(roots, &normalized, &local,
+    if (casi_repo_crypto_enabled(repo)) {
+        if ((rc = asset_unwrap(&normalized, &scope, &name, &content)) != CASI_OK ||
+            (rc = asset_scope(asset->kind, asset->project_id, asset->session_id,
+                              &expected_scope)) != CASI_OK)
+            goto done;
+        if (strcmp(casi_buf_cstr(&name), asset->name) != 0 ||
+            strcmp(casi_buf_cstr(&scope), casi_buf_cstr(&expected_scope)) != 0) {
+            rc = casi_error_set(CASI_EINVAL, "encrypted auxiliary does not match its tree path");
+            goto done;
+        }
+    } else {
+        if ((rc = casi_buf_put(&content, normalized.ptr, normalized.len)) != CASI_OK)
+            goto done;
+    }
+    if ((rc = casi_roots_denormalize_text(roots, &content, &local,
                                           unmapped_out)) != CASI_OK)
         goto done;
     rc = casi_fs_write_file_atomic(path, local.ptr, local.len);
 
 done:
     casi_buf_dispose(&normalized);
+    casi_buf_dispose(&content);
+    casi_buf_dispose(&scope);
+    casi_buf_dispose(&expected_scope);
+    casi_buf_dispose(&name);
     casi_buf_dispose(&local);
     return rc;
 }

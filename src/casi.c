@@ -2,6 +2,7 @@
 #include "casi/casi.h"
 
 #include <git2.h>
+#include <sodium.h>
 
 #include <stdio.h>
 
@@ -19,6 +20,9 @@ int casi_init(void)
      */
     if (setvbuf(stdout, NULL, _IOLBF, BUFSIZ) != 0)
         return casi_error_set(CASI_EIO, "cannot configure stdout buffering");
+
+    if (sodium_init() < 0)
+        return casi_error_set(CASI_ERROR, "cannot initialise libsodium");
 
     if (git_libgit2_init() < 0)
         return casi_error_set_git(CASI_ERROR, "cannot initialise libgit2");

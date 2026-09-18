@@ -175,11 +175,40 @@ int casi_shared_config_serialize(const casi_shared_config *cfg, casi_buf *out)
     return CASI_OK;
 }
 
-int casi_shared_config_load_remote(casi_repo *repo, casi_shared_config *cfg,
-                                   bool *present_out)
+static int encrypted_header_matches(const casi_crypto *crypto, const casi_buf *header)
+{
+    casi_buf mode = CASI_BUF_INIT, expected_id = CASI_BUF_INIT, key_id = CASI_BUF_INIT;
+    int rc = CASI_OK;
+
+    if (crypto == NULL || !crypto->enabled) {
+        rc = casi_error_set(CASI_EINVAL,
+                            "remote configuration is encrypted but this machine has no key");
+        goto done;
+    }
+    if (!casi_json_find_string(header->ptr, header->len, "mode", &mode) ||
+        strcmp(casi_buf_cstr(&mode), CASI_CRYPTO_MODE_CONVERGENT) != 0 ||
+        !casi_json_find_string(header->ptr, header->len, "keyId", &key_id)) {
+        rc = casi_error_set(CASI_EINVAL, "unsupported encrypted casi.json header");
+        goto done;
+    }
+    if ((rc = casi_crypto_key_id(crypto, &expected_id)) != CASI_OK)
+        goto done;
+    if (strcmp(casi_buf_cstr(&key_id), casi_buf_cstr(&expected_id)) != 0)
+        rc = casi_error_set(CASI_EINVAL, "encryption key does not match the remote");
+
+done:
+    casi_buf_dispose(&mode);
+    casi_buf_dispose(&expected_id);
+    casi_buf_dispose(&key_id);
+    return rc;
+}
+
+int casi_shared_config_load_remote(casi_repo *repo, const casi_crypto *crypto,
+                                   casi_shared_config *cfg, bool *present_out)
 {
     git_oid tree;
-    casi_buf json = CASI_BUF_INIT;
+    casi_buf json = CASI_BUF_INIT, payload_name = CASI_BUF_INIT, payload = CASI_BUF_INIT;
+    uint64_t format;
     int rc;
 
     if (present_out != NULL)
@@ -193,10 +222,30 @@ int casi_shared_config_load_remote(casi_repo *repo, casi_shared_config *cfg,
     }
     if (rc != CASI_OK)
         goto done;
-    if ((rc = casi_repo_tree_entry_blob(repo, &tree, "casi.json", &json)) != CASI_OK)
+    if ((rc = casi_repo_tree_entry_blob_raw(repo, &tree, "casi.json", &json)) != CASI_OK)
         goto done;
-    if ((rc = casi_shared_config_parse(cfg, casi_buf_cstr(&json), json.len)) != CASI_OK)
+    format = casi_json_find_uint(json.ptr, json.len, "format");
+    if (format == CASI_SHARED_CONFIG_FORMAT) {
+        if (crypto != NULL && crypto->enabled) {
+            rc = casi_error_set(CASI_EINVAL,
+                                "remote configuration is unencrypted but this machine enables encryption");
+            goto done;
+        }
+        if ((rc = casi_shared_config_parse(cfg, json.ptr, json.len)) != CASI_OK)
+            goto done;
+    } else if (format == 2) {
+        if ((rc = encrypted_header_matches(crypto, &json)) != CASI_OK ||
+            (rc = casi_crypto_path_component(crypto, "config", &payload_name)) != CASI_OK ||
+            (rc = casi_repo_tree_entry_blob_raw(repo, &tree, casi_buf_cstr(&payload_name),
+                                                 &payload)) != CASI_OK ||
+            (rc = casi_crypto_decrypt(crypto, casi_buf_cstr(&payload_name), payload.ptr,
+                                      payload.len, &json)) != CASI_OK ||
+            (rc = casi_shared_config_parse(cfg, json.ptr, json.len)) != CASI_OK)
+            goto done;
+    } else {
+        rc = casi_error_set(CASI_EINVAL, "unsupported or missing casi.json format");
         goto done;
+    }
 
     if (present_out != NULL)
         *present_out = true;
@@ -204,23 +253,47 @@ int casi_shared_config_load_remote(casi_repo *repo, casi_shared_config *cfg,
 
 done:
     casi_buf_dispose(&json);
+    casi_buf_dispose(&payload_name);
+    casi_buf_dispose(&payload);
     return rc;
 }
 
 int casi_shared_config_commit_push(casi_repo *repo, const casi_shared_config *cfg,
-                                   const char *machine)
+                                   const casi_crypto *crypto, const char *machine)
 {
     casi_tree *tree = NULL;
-    casi_buf json = CASI_BUF_INIT;
+    casi_buf json = CASI_BUF_INIT, payload_name = CASI_BUF_INIT, cipher = CASI_BUF_INIT,
+             key_id = CASI_BUF_INIT;
     git_oid tree_oid, existing_tree, commit;
     int rc;
 
     if ((rc = casi_repo_reset_ref_from(repo, CASI_SHARED_CONFIG_REF,
                                        CASI_SHARED_CONFIG_REMOTE_REF)) != CASI_OK ||
         (rc = casi_shared_config_serialize(cfg, &json)) != CASI_OK ||
-        (rc = casi_tree_new(repo, &tree)) != CASI_OK ||
-        (rc = casi_tree_add_text(tree, "casi.json", casi_buf_cstr(&json))) != CASI_OK ||
-        (rc = casi_tree_write(tree, &tree_oid)) != CASI_OK)
+        (rc = casi_tree_new(repo, &tree)) != CASI_OK)
+        goto done;
+
+    if (crypto != NULL && crypto->enabled) {
+        git_oid payload_oid;
+
+        if ((rc = casi_crypto_path_component(crypto, "config", &payload_name)) != CASI_OK ||
+            (rc = casi_crypto_encrypt(crypto, casi_buf_cstr(&payload_name), json.ptr, json.len,
+                                      &cipher)) != CASI_OK ||
+            (rc = casi_crypto_key_id(crypto, &key_id)) != CASI_OK)
+            goto done;
+        casi_buf_clear(&json);
+        if ((rc = casi_buf_printf(&json,
+                                  "{\"format\":2,\"crypto\":{\"mode\":\"%s\",\"keyId\":\"%s\"}}\n",
+                                  CASI_CRYPTO_MODE_CONVERGENT,
+                                  casi_buf_cstr(&key_id))) != CASI_OK ||
+            (rc = casi_repo_write_blob_raw(repo, cipher.ptr, cipher.len, &payload_oid)) != CASI_OK ||
+            (rc = casi_tree_add_text_raw(tree, "casi.json", casi_buf_cstr(&json))) != CASI_OK ||
+            (rc = casi_tree_add(tree, casi_buf_cstr(&payload_name), &payload_oid)) != CASI_OK)
+            goto done;
+    } else if ((rc = casi_tree_add_text(tree, "casi.json", casi_buf_cstr(&json))) != CASI_OK) {
+        goto done;
+    }
+    if ((rc = casi_tree_write(tree, &tree_oid)) != CASI_OK)
         goto done;
 
     rc = casi_repo_ref_tree(repo, CASI_SHARED_CONFIG_REF, &existing_tree);
@@ -255,5 +328,8 @@ int casi_shared_config_commit_push(casi_repo *repo, const casi_shared_config *cf
 done:
     casi_tree_free(tree);
     casi_buf_dispose(&json);
+    casi_buf_dispose(&payload_name);
+    casi_buf_dispose(&cipher);
+    casi_buf_dispose(&key_id);
     return rc;
 }

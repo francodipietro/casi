@@ -27,6 +27,7 @@ const char *casi_paths_config_file(void);
 const char *casi_paths_data_dir(void);
 const char *casi_paths_repo(void);
 const char *casi_paths_index(void);
+const char *casi_paths_key_file(void);
 const char *casi_paths_conflicts_dir(void);
 const char *casi_paths_claude_home(void);
 

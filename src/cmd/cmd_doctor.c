@@ -45,7 +45,7 @@ int casi_cmd_doctor(int argc, char **argv)
         goto done;
     casi_info("remote: reachable");
 
-    if ((rc = casi_shared_config_load_remote(ctx.repo, &shared, &present)) != CASI_OK)
+    if ((rc = casi_shared_config_load_remote(ctx.repo, &ctx.crypto, &shared, &present)) != CASI_OK)
         goto done;
     if (!present) {
         casi_info("roots: no shared configuration yet");

@@ -11,6 +11,7 @@ static casi_buf g_config_file    = CASI_BUF_INIT;
 static casi_buf g_data_dir       = CASI_BUF_INIT;
 static casi_buf g_repo           = CASI_BUF_INIT;
 static casi_buf g_index          = CASI_BUF_INIT;
+static casi_buf g_key_file       = CASI_BUF_INIT;
 static casi_buf g_conflicts_dir  = CASI_BUF_INIT;
 static casi_buf g_claude_home    = CASI_BUF_INIT;
 
@@ -118,6 +119,11 @@ const char *casi_paths_index(void)
     return under_data_dir(&g_index, "index");
 }
 
+const char *casi_paths_key_file(void)
+{
+    return under_data_dir(&g_key_file, "crypto.key");
+}
+
 const char *casi_paths_conflicts_dir(void)
 {
     return under_data_dir(&g_conflicts_dir, "conflicts");
@@ -155,6 +161,7 @@ void casi_paths_reset(void)
     casi_buf_dispose(&g_data_dir);
     casi_buf_dispose(&g_repo);
     casi_buf_dispose(&g_index);
+    casi_buf_dispose(&g_key_file);
     casi_buf_dispose(&g_conflicts_dir);
     casi_buf_dispose(&g_claude_home);
 }
