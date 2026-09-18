@@ -38,6 +38,13 @@ git -C "$work/remote.git" cat-file --batch-all-objects --batch-check='%(objectna
 echo "  ok   remote tree and blobs hide private names and content"
 
 mkdir -p "$work/b/code/private-project" "$work/b/.claude" "$work/b/casi"
+set +e
+HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude" \
+    "$casi" init --remote "file://$work/remote.git" --machine machine-b --encrypt >/dev/null 2>&1
+missing_key_rc=$?
+set -e
+[ "$missing_key_rc" = 2 ] || fail "join without a copied key: exit $missing_key_rc, want 2"
+[ ! -e "$work/b/casi/crypto.key" ] || fail "join without a key created a stray keyfile"
 cp "$work/a/casi/crypto.key" "$work/b/casi/crypto.key"
 chmod 600 "$work/b/casi/crypto.key"
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"

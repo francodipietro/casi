@@ -290,6 +290,26 @@ static int asset_unwrap(const casi_buf *wrapped, casi_buf *name, casi_buf *conte
     return CASI_OK;
 }
 
+static int append_chunk_oids(casi_buf *out, const git_oid *chunks, size_t count)
+{
+    size_t i;
+    int rc;
+
+    casi_buf_clear(out);
+    if ((rc = casi_buf_putc(out, '[')) != CASI_OK)
+        return rc;
+    for (i = 0; i < count; i++) {
+        char text[GIT_OID_HEXSZ + 1];
+
+        if (i > 0 && (rc = casi_buf_putc(out, ',')) != CASI_OK)
+            return rc;
+        git_oid_tostr(text, sizeof(text), &chunks[i]);
+        if ((rc = casi_buf_printf(out, "\"%s\"", text)) != CASI_OK)
+            return rc;
+    }
+    return casi_buf_putc(out, ']');
+}
+
 /* --- writing ---------------------------------------------------------- */
 
 struct chunk_writer {
@@ -687,7 +707,7 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
     casi_tree *tree = NULL;
     casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT, meta = CASI_BUF_INIT;
     casi_buf session_json = CASI_BUF_INIT, project_json = CASI_BUF_INIT,
-             project_id_json = CASI_BUF_INIT;
+             project_id_json = CASI_BUF_INIT, chunk_oids = CASI_BUF_INIT;
     size_t i, c;
     int rc;
 
@@ -714,6 +734,8 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
             goto done;
         if ((rc = casi_json_escape_string(e->project_id, &project_id_json)) != CASI_OK)
             goto done;
+        if ((rc = append_chunk_oids(&chunk_oids, e->chunks, e->chunk_count)) != CASI_OK)
+            goto done;
 
         casi_buf_clear(&meta);
         rc = casi_buf_printf(&meta,
@@ -721,10 +743,11 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
                              "\"projectId\":\"%s\","
                              "\"projectPath\":\"%s\","
                              "\"chunks\":%zu,"
+                             "\"chunkOids\":%s,"
                              "\"bytes\":%" PRIu64 "}\n",
                              casi_buf_cstr(&session_json), casi_buf_cstr(&project_id_json),
                              casi_buf_cstr(&project_json),
-                             e->chunk_count, e->bytes);
+                             e->chunk_count, casi_buf_cstr(&chunk_oids), e->bytes);
         if (rc != CASI_OK)
             goto done;
 
@@ -781,6 +804,7 @@ done:
     casi_buf_dispose(&session_json);
     casi_buf_dispose(&project_json);
     casi_buf_dispose(&project_id_json);
+    casi_buf_dispose(&chunk_oids);
     return rc;
 }
 
@@ -884,7 +908,7 @@ static int read_encrypted_session_entry(casi_repo *repo, const git_oid *tree,
     casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT, meta = CASI_BUF_INIT;
     casi_buf project_id = CASI_BUF_INIT, session_id = CASI_BUF_INIT,
              project_path = CASI_BUF_INIT, number = CASI_BUF_INIT;
-    casi_strvec asset_names = CASI_STRVEC_INIT;
+    casi_strvec asset_names = CASI_STRVEC_INIT, chunk_oids = CASI_STRVEC_INIT;
     casi_entry entry;
     uint64_t chunk_count;
     size_t i;
@@ -900,12 +924,13 @@ static int read_encrypted_session_entry(casi_repo *repo, const git_oid *tree,
     if (!casi_json_find_string(meta.ptr, meta.len, "sessionId", &session_id) ||
         !casi_json_find_string(meta.ptr, meta.len, "projectId", &project_id) ||
         !casi_json_find_string(meta.ptr, meta.len, "projectPath", &project_path) ||
-        !casi_json_has_key(meta.ptr, meta.len, "chunks")) {
+        !casi_json_has_key(meta.ptr, meta.len, "chunks") ||
+        !casi_json_find_string_array(meta.ptr, meta.len, "chunkOids", &chunk_oids)) {
         rc = casi_error_set(CASI_EINVAL, "malformed encrypted session metadata");
         goto done;
     }
     chunk_count = casi_json_find_uint(meta.ptr, meta.len, "chunks");
-    if (chunk_count > SIZE_MAX ||
+    if (chunk_count > SIZE_MAX || chunk_oids.len != (size_t)chunk_count ||
         (rc = path_component_matches(repo, casi_buf_cstr(&project_id), physical_project)) != CASI_OK ||
         (rc = path_component_matches(repo, casi_buf_cstr(&session_id), physical_session)) != CASI_OK)
         goto done;
@@ -936,6 +961,16 @@ static int read_encrypted_session_entry(casi_repo *repo, const git_oid *tree,
             (rc = casi_repo_tree_entry_oid(repo, tree, casi_buf_cstr(&path),
                                            &entry.chunks[i])) != CASI_OK)
             goto done;
+        {
+            git_oid expected;
+
+            if (git_oid_fromstr(&expected, chunk_oids.items[i]) != 0 ||
+                !git_oid_equal(&expected, &entry.chunks[i])) {
+                rc = casi_error_set(CASI_EINVAL,
+                                    "encrypted chunk does not match its authenticated manifest");
+                goto done;
+            }
+        }
     }
     if ((rc = entry_list_push(out, &entry)) != CASI_OK)
         goto done;
@@ -969,6 +1004,7 @@ static int read_encrypted_session_entry(casi_repo *repo, const git_oid *tree,
 done:
     entry_dispose(&entry);
     casi_strvec_dispose(&asset_names);
+    casi_strvec_dispose(&chunk_oids);
     casi_buf_dispose(&dir);
     casi_buf_dispose(&path);
     casi_buf_dispose(&meta);

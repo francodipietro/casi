@@ -88,6 +88,14 @@ int casi_cmd_init(int argc, char **argv)
             goto encrypt_done;
         if ((rc = casi_repo_list_machines(repo, &machines)) != CASI_OK)
             goto encrypt_done;
+        /* Joining a populated encrypted remote requires a key copied by the
+         * user first. Do not manufacture an unrelated default key and then
+         * strand it when the remote key-id check fails. */
+        if (!casi_fs_exists(keyfile) && machines.len > 0) {
+            rc = casi_error_set(CASI_EINVAL,
+                                "encrypted remote requires an existing keyfile; copy it before init");
+            goto encrypt_done;
+        }
         if (!casi_fs_exists(keyfile) && (rc = casi_crypto_generate_key_file(keyfile)) != CASI_OK)
             goto encrypt_done;
         if ((rc = casi_crypto_load_key_file(keyfile, &crypto)) != CASI_OK)
