@@ -78,6 +78,7 @@ int casi_cmd_init(int argc, char **argv)
         casi_crypto crypto = { 0 };
         casi_strvec machines = CASI_STRVEC_INIT;
         casi_shared_config shared = { 0 };
+        git_oid config_tree;
         bool config_present = false;
 
         if (keyfile == NULL) {
@@ -96,6 +97,16 @@ int casi_cmd_init(int argc, char **argv)
                                 "encrypted remote requires an existing keyfile; copy it before init");
             goto encrypt_done;
         }
+        rc = casi_repo_ref_tree(repo, CASI_SHARED_CONFIG_REMOTE_REF, &config_tree);
+        if (rc == CASI_OK && !casi_fs_exists(keyfile)) {
+            rc = casi_error_set(CASI_EINVAL,
+                                "encrypted remote requires an existing keyfile; copy it before init");
+            goto encrypt_done;
+        }
+        if (rc != CASI_OK && rc != CASI_ENOTFOUND)
+            goto encrypt_done;
+        casi_error_clear();
+        rc = CASI_OK;
         if (!casi_fs_exists(keyfile) && (rc = casi_crypto_generate_key_file(keyfile)) != CASI_OK)
             goto encrypt_done;
         if ((rc = casi_crypto_load_key_file(keyfile, &crypto)) != CASI_OK)

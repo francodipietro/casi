@@ -246,48 +246,75 @@ static bool project_meta_already_written(const casi_asset_list *assets, size_t e
 /* An encrypted auxiliary leaf needs to carry its original name: that name is
  * itself an HMAC tree component and therefore cannot be recovered by listing
  * the tree. The wrapper is inside the ordinary encrypted blob. */
-static int asset_wrap(const char *name, const casi_buf *content, casi_buf *out)
+static int asset_scope(casi_aux_kind kind, const char *project_id,
+                       const char *session_id, casi_buf *out)
 {
-    size_t name_len = strlen(name);
-    unsigned char length[4];
+    casi_buf_clear(out);
+    return casi_buf_printf(out, "%d\n%s\n%s", (int)kind, project_id,
+                           session_id != NULL ? session_id : "");
+}
+
+static int asset_wrap(const casi_aux_file *file, const casi_buf *content, casi_buf *out)
+{
+    casi_buf scope = CASI_BUF_INIT;
+    size_t name_len = strlen(file->name);
+    unsigned char lengths[8];
     int rc;
 
-    if (name_len > UINT32_MAX)
-        return casi_error_set(CASI_EINVAL, "auxiliary filename is too long");
-    length[0] = (unsigned char)name_len;
-    length[1] = (unsigned char)(name_len >> 8);
-    length[2] = (unsigned char)(name_len >> 16);
-    length[3] = (unsigned char)(name_len >> 24);
+    if ((rc = asset_scope(file->kind, file->project_id, file->session_id, &scope)) != CASI_OK)
+        goto done;
+    if (name_len > UINT32_MAX || scope.len > UINT32_MAX) {
+        rc = casi_error_set(CASI_EINVAL, "auxiliary filename is too long");
+        goto done;
+    }
+    lengths[0] = (unsigned char)scope.len;
+    lengths[1] = (unsigned char)(scope.len >> 8);
+    lengths[2] = (unsigned char)(scope.len >> 16);
+    lengths[3] = (unsigned char)(scope.len >> 24);
+    lengths[4] = (unsigned char)name_len;
+    lengths[5] = (unsigned char)(name_len >> 8);
+    lengths[6] = (unsigned char)(name_len >> 16);
+    lengths[7] = (unsigned char)(name_len >> 24);
     casi_buf_clear(out);
     if ((rc = casi_buf_put(out, CASI_ASSET_MAGIC, CASI_ASSET_MAGIC_LEN)) != CASI_OK ||
-        (rc = casi_buf_put(out, length, sizeof(length))) != CASI_OK ||
-        (rc = casi_buf_put(out, name, name_len)) != CASI_OK ||
+        (rc = casi_buf_put(out, lengths, sizeof(lengths))) != CASI_OK ||
+        (rc = casi_buf_put(out, scope.ptr, scope.len)) != CASI_OK ||
+        (rc = casi_buf_put(out, file->name, name_len)) != CASI_OK ||
         (rc = casi_buf_put(out, content->ptr, content->len)) != CASI_OK)
         casi_buf_clear(out);
+done:
+    casi_buf_dispose(&scope);
     return rc;
 }
 
-static int asset_unwrap(const casi_buf *wrapped, casi_buf *name, casi_buf *content)
+static int asset_unwrap(const casi_buf *wrapped, casi_buf *scope, casi_buf *name,
+                        casi_buf *content)
 {
     const unsigned char *p = (const unsigned char *)wrapped->ptr;
-    size_t offset = CASI_ASSET_MAGIC_LEN + 4, name_len;
+    size_t offset = CASI_ASSET_MAGIC_LEN + 8, scope_len, name_len;
     int rc;
 
     if (wrapped->len < offset || memcmp(p, CASI_ASSET_MAGIC, CASI_ASSET_MAGIC_LEN) != 0)
         return casi_error_set(CASI_EINVAL, "unsupported encrypted auxiliary format");
-    name_len = (size_t)p[CASI_ASSET_MAGIC_LEN] |
-               ((size_t)p[CASI_ASSET_MAGIC_LEN + 1] << 8) |
-               ((size_t)p[CASI_ASSET_MAGIC_LEN + 2] << 16) |
-               ((size_t)p[CASI_ASSET_MAGIC_LEN + 3] << 24);
-    if (name_len > wrapped->len - offset)
-        return casi_error_set(CASI_EINVAL, "malformed encrypted auxiliary content");
+    scope_len = (size_t)p[CASI_ASSET_MAGIC_LEN] |
+                ((size_t)p[CASI_ASSET_MAGIC_LEN + 1] << 8) |
+                ((size_t)p[CASI_ASSET_MAGIC_LEN + 2] << 16) |
+                ((size_t)p[CASI_ASSET_MAGIC_LEN + 3] << 24);
+    name_len = (size_t)p[CASI_ASSET_MAGIC_LEN + 4] |
+               ((size_t)p[CASI_ASSET_MAGIC_LEN + 5] << 8) |
+               ((size_t)p[CASI_ASSET_MAGIC_LEN + 6] << 16) |
+               ((size_t)p[CASI_ASSET_MAGIC_LEN + 7] << 24);
+    if (scope_len > wrapped->len - offset || name_len > wrapped->len - offset - scope_len)
+        return casi_error_set(CASI_EINVAL, "auxiliary filename is too long");
+    casi_buf_clear(scope);
     casi_buf_clear(name);
     casi_buf_clear(content);
-    if ((rc = casi_buf_put(name, p + offset, name_len)) != CASI_OK ||
-        (rc = casi_buf_put(content, p + offset + name_len,
-                           wrapped->len - offset - name_len)) != CASI_OK)
+    if ((rc = casi_buf_put(scope, p + offset, scope_len)) != CASI_OK ||
+        (rc = casi_buf_put(name, p + offset + scope_len, name_len)) != CASI_OK ||
+        (rc = casi_buf_put(content, p + offset + scope_len + name_len,
+                           wrapped->len - offset - scope_len - name_len)) != CASI_OK)
         return rc;
-    return CASI_OK;
+    return rc;
 }
 
 static int append_chunk_oids(casi_buf *out, const git_oid *chunks, size_t count)
@@ -617,7 +644,7 @@ static int scan_one_asset(casi_repo *repo, const casi_roots *roots,
     if ((rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
         goto done;
     if (casi_repo_crypto_enabled(repo)) {
-        if ((rc = asset_wrap(file->name, &normalized, &wrapped)) != CASI_OK)
+        if ((rc = asset_wrap(file, &normalized, &wrapped)) != CASI_OK)
             goto done;
         if ((rc = casi_repo_write_blob(repo, wrapped.ptr, wrapped.len, &asset.oid)) != CASI_OK)
             goto done;
@@ -867,16 +894,22 @@ static int encrypted_asset_from_path(casi_repo *repo, const git_oid *tree,
                                      const char *project_id, const char *session_id,
                                      casi_asset_list *assets_out)
 {
-    casi_buf wrapped = CASI_BUF_INIT, name = CASI_BUF_INIT, content = CASI_BUF_INIT;
+    casi_buf wrapped = CASI_BUF_INIT, scope = CASI_BUF_INIT, name = CASI_BUF_INIT,
+             content = CASI_BUF_INIT, expected_scope = CASI_BUF_INIT;
     casi_asset asset;
     int rc;
 
     memset(&asset, 0, sizeof(asset));
     if ((rc = casi_repo_tree_entry_oid(repo, tree, path, &asset.oid)) != CASI_OK ||
         (rc = casi_repo_read_blob(repo, &asset.oid, &wrapped)) != CASI_OK ||
-        (rc = asset_unwrap(&wrapped, &name, &content)) != CASI_OK ||
+        (rc = asset_unwrap(&wrapped, &scope, &name, &content)) != CASI_OK ||
+        (rc = asset_scope(kind, project_id, session_id, &expected_scope)) != CASI_OK ||
         (rc = path_component_matches(repo, casi_buf_cstr(&name), physical_name)) != CASI_OK)
         goto done;
+    if (strcmp(casi_buf_cstr(&scope), casi_buf_cstr(&expected_scope)) != 0) {
+        rc = casi_error_set(CASI_EINVAL, "encrypted auxiliary does not match its tree scope");
+        goto done;
+    }
     asset.kind = kind;
     asset.project_path = casi_strdup(project_path);
     asset.project_id = casi_strdup(project_id);
@@ -893,8 +926,10 @@ static int encrypted_asset_from_path(casi_repo *repo, const git_oid *tree,
 done:
     asset_dispose(&asset);
     casi_buf_dispose(&wrapped);
+    casi_buf_dispose(&scope);
     casi_buf_dispose(&name);
     casi_buf_dispose(&content);
+    casi_buf_dispose(&expected_scope);
     return rc;
 }
 
@@ -1459,17 +1494,20 @@ int casi_store_materialize_asset_to(casi_repo *repo, const casi_roots *roots,
                                     const casi_asset *asset, const char *path,
                                     casi_buf *unmapped_out)
 {
-    casi_buf normalized = CASI_BUF_INIT, content = CASI_BUF_INIT, name = CASI_BUF_INIT,
-             local = CASI_BUF_INIT;
+    casi_buf normalized = CASI_BUF_INIT, content = CASI_BUF_INIT, scope = CASI_BUF_INIT,
+             expected_scope = CASI_BUF_INIT, name = CASI_BUF_INIT, local = CASI_BUF_INIT;
     int rc;
 
     if ((rc = casi_repo_read_blob(repo, &asset->oid, &normalized)) != CASI_OK)
         goto done;
     if (casi_repo_crypto_enabled(repo)) {
-        if ((rc = asset_unwrap(&normalized, &name, &content)) != CASI_OK)
+        if ((rc = asset_unwrap(&normalized, &scope, &name, &content)) != CASI_OK ||
+            (rc = asset_scope(asset->kind, asset->project_id, asset->session_id,
+                              &expected_scope)) != CASI_OK)
             goto done;
-        if (strcmp(casi_buf_cstr(&name), asset->name) != 0) {
-            rc = casi_error_set(CASI_EINVAL, "encrypted auxiliary name does not match its tree path");
+        if (strcmp(casi_buf_cstr(&name), asset->name) != 0 ||
+            strcmp(casi_buf_cstr(&scope), casi_buf_cstr(&expected_scope)) != 0) {
+            rc = casi_error_set(CASI_EINVAL, "encrypted auxiliary does not match its tree path");
             goto done;
         }
     } else {
@@ -1484,6 +1522,8 @@ int casi_store_materialize_asset_to(casi_repo *repo, const casi_roots *roots,
 done:
     casi_buf_dispose(&normalized);
     casi_buf_dispose(&content);
+    casi_buf_dispose(&scope);
+    casi_buf_dispose(&expected_scope);
     casi_buf_dispose(&name);
     casi_buf_dispose(&local);
     return rc;
