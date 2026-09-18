@@ -6,7 +6,7 @@ decisions in this codebase: the JSONL format investigation, the chunking
 rationale, the prefix conflict rule, the phase breakdown.
 
 **Read [HANDOFF.md](../HANDOFF.md) first.** It preserves the empirical Phase 1
-handoff and now records the Phase 3 closeout. The original plan below remains
+handoff and now records the Phase 4 closeout. The original plan below remains
 historical; consult the current git state alongside the durable docs for
 subsequent work.
 
@@ -32,6 +32,13 @@ Known supersessions (see HANDOFF.md for detail):
   regressions. Conflict parking, `pull --theirs`, `--dry-run`, `--porcelain`,
   and atomic materialization had landed earlier. The real 390 MiB latency
   measurement is still an evidence gap recorded in HANDOFF.md.
+- §11's Phase 4 scope is complete in PR #9. `casi init --encrypt` creates or
+  accepts a private `0600` keyfile, does not migrate an existing remote, and
+  requires an explicitly copied matching key to join an encrypted store. The
+  `encryption` integration test verifies opaque remote content and names plus
+  recovery of the transcript, sidecar, and memory after copying the key. See
+  `docs/DESIGN.md` and HANDOFF.md for the security boundaries; an OS-keychain
+  backend remains a future UX enhancement.
 
 Everything else below reflects what was actually built.
 
@@ -639,6 +646,12 @@ path como HMAC-SHA256 para no filtrar nombres de proyectos, clave fuera del remo
 (`crypto.keyfile` o llavero del SO), modo fijado en `casi.json` al hacer `init`. *Verificable:*
 un clon del remote sin la clave no revela ni nombres de proyecto ni contenido; con la clave, el
 roundtrip es byte-exacto.
+
+> Entregada en PR #9. El modo se fija al crear el store con `--encrypt`; la
+> clave queda solamente en un keyfile local privado y un remote existente no
+> se migra implícitamente. `encryption` prueba tanto la opacidad del remote
+> como la materialización de transcript, sidecar y memoria tras copiar la
+> clave, con reescritura de paths en transcript y memoria.
 
 **Fase 5 — Distribución y apertura.** Releases prebuilt desde CI, tap de Homebrew, PKGBUILD,
 `.deb`, `docs/FORMAT.md` (el formato del árbol como contrato estable), repo público.
