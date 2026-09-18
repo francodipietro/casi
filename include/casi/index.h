@@ -36,8 +36,11 @@ typedef struct {
     size_t         chunk_count;
 } casi_index_entry;
 
-/* Missing, malformed, or obsolete cache files are treated as an empty cache. */
-int  casi_index_open(const casi_roots *roots, casi_index **out);
+/* Missing, malformed, or obsolete cache files are treated as an empty cache.
+ * `crypto_key_id` separates otherwise identical local scans encrypted with
+ * different keys; NULL means no encryption. */
+int  casi_index_open(const casi_roots *roots, const char *crypto_key_id,
+                     casi_index **out);
 void casi_index_free(casi_index *index);
 
 const casi_index_entry *casi_index_find(const casi_index *index,

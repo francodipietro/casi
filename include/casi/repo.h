@@ -5,6 +5,7 @@
 #include <git2.h>
 
 #include "casi/buf.h"
+#include "casi/crypto.h"
 #include "casi/str.h"
 
 /*
@@ -33,6 +34,14 @@ void casi_repo_free(casi_repo *repo);
 
 git_repository *casi_repo_git(casi_repo *repo);
 
+/* Installs a copy of the local crypto context for all ordinary content blobs. */
+void casi_repo_set_crypto(casi_repo *repo, const casi_crypto *crypto);
+bool casi_repo_crypto_enabled(const casi_repo *repo);
+/* Encodes one logical tree component when the local store is encrypted. */
+int casi_repo_path_component(casi_repo *repo, const char *component, casi_buf *out);
+/* A stable cache domain; it changes when the configured encryption key does. */
+int casi_repo_crypto_key_id(casi_repo *repo, casi_buf *out);
+
 /* A machine label becomes the final component of refs/heads/casi/<machine>.
  * Validate that invariant before persisting it or trying to create a ref. */
 int casi_repo_validate_machine_name(const char *machine);
@@ -40,6 +49,9 @@ int casi_repo_validate_machine_name(const char *machine);
 int casi_repo_write_blob(casi_repo *repo, const void *data, size_t len, git_oid *out);
 int casi_repo_read_blob(casi_repo *repo, const git_oid *oid, casi_buf *out);
 int casi_repo_blob_size(casi_repo *repo, const git_oid *oid, uint64_t *out);
+/* Raw blobs are reserved for the non-secret encrypted-config header. */
+int casi_repo_write_blob_raw(casi_repo *repo, const void *data, size_t len, git_oid *out);
+int casi_repo_read_blob_raw(casi_repo *repo, const git_oid *oid, casi_buf *out);
 int casi_repo_has_object(casi_repo *repo, const git_oid *oid);
 
 /*
@@ -52,6 +64,7 @@ typedef struct casi_tree casi_tree;
 int  casi_tree_new(casi_repo *repo, casi_tree **out);
 int  casi_tree_add(casi_tree *tree, const char *path, const git_oid *blob);
 int  casi_tree_add_text(casi_tree *tree, const char *path, const char *text);
+int  casi_tree_add_text_raw(casi_tree *tree, const char *path, const char *text);
 int  casi_tree_write(casi_tree *tree, git_oid *tree_out);
 void casi_tree_free(casi_tree *tree);
 
@@ -77,6 +90,8 @@ int casi_repo_tree_entry_oid(casi_repo *repo, const git_oid *tree,
 /* Reads one blob addressed by path within a tree. */
 int casi_repo_tree_entry_blob(casi_repo *repo, const git_oid *tree,
                               const char *path, casi_buf *out);
+int casi_repo_tree_entry_blob_raw(casi_repo *repo, const git_oid *tree,
+                                  const char *path, casi_buf *out);
 /* Names of the entries directly under `path` in `tree` (sorted, no recursion).
  * CASI_ENOTFOUND when the path is absent -- an empty store, usually. */
 int casi_repo_tree_list(casi_repo *repo, const git_oid *tree, const char *path,

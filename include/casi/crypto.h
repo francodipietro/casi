@@ -10,6 +10,8 @@
 /* A master key is generated locally and never enters a git object. */
 #define CASI_CRYPTO_KEY_BYTES 32
 #define CASI_CRYPTO_MODE_CONVERGENT "convergent-v1"
+/* Magic + nonce + AEAD tag; the ciphertext body has the plaintext length. */
+#define CASI_CRYPTO_BLOB_OVERHEAD 48
 
 typedef struct {
     bool          enabled;

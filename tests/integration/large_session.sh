@@ -39,7 +39,9 @@ before=$(git -C "$work/remote.git" count-objects -v | awk '/^size-pack:/{print $
 # the first byte of the source before appending.  A correct scanner must prove
 # the old final blob starts the new tail, reject this offset, rescan, and still
 # materialise the exact transcript on machine B below.
-root_key_len=$((${#project} + 5)) # "src\\0${project}\\0"
+# "src\\0${project}\\0crypto\\0none\\0". The crypto cache domain keeps
+# encrypted OIDs from being reused after a local key change.
+root_key_len=$((${#project} + 17))
 session_len=${#session}
 tail_raw_offset=$((63 + root_key_len + session_len))
 printf '\001\000\000\000\000\000\000\000' |

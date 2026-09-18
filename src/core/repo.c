@@ -13,6 +13,7 @@
 
 struct casi_repo {
     git_repository *git;
+    casi_crypto     crypto;
 };
 
 struct casi_tree {
@@ -83,6 +84,7 @@ void casi_repo_free(casi_repo *repo)
 {
     if (repo == NULL)
         return;
+    casi_crypto_dispose(&repo->crypto);
     git_repository_free(repo->git);
     free(repo);
 }
@@ -90,6 +92,38 @@ void casi_repo_free(casi_repo *repo)
 git_repository *casi_repo_git(casi_repo *repo)
 {
     return repo->git;
+}
+
+void casi_repo_set_crypto(casi_repo *repo, const casi_crypto *crypto)
+{
+    casi_crypto_dispose(&repo->crypto);
+    if (crypto != NULL && crypto->enabled)
+        repo->crypto = *crypto;
+}
+
+bool casi_repo_crypto_enabled(const casi_repo *repo)
+{
+    return repo != NULL && repo->crypto.enabled;
+}
+
+int casi_repo_path_component(casi_repo *repo, const char *component, casi_buf *out)
+{
+    if (repo == NULL || component == NULL)
+        return casi_error_set(CASI_EINVAL, "invalid tree path component");
+    if (repo->crypto.enabled)
+        return casi_crypto_path_component(&repo->crypto, component, out);
+    casi_buf_clear(out);
+    return casi_buf_puts(out, component);
+}
+
+int casi_repo_crypto_key_id(casi_repo *repo, casi_buf *out)
+{
+    if (repo == NULL)
+        return casi_error_set(CASI_EINVAL, "missing repository for encryption cache key");
+    if (repo->crypto.enabled)
+        return casi_crypto_key_id(&repo->crypto, out);
+    casi_buf_clear(out);
+    return casi_buf_puts(out, "none");
 }
 
 int casi_repo_validate_machine_name(const char *machine)
@@ -136,36 +170,79 @@ done:
 
 /* --- objects ---------------------------------------------------------- */
 
-int casi_repo_write_blob(casi_repo *repo, const void *data, size_t len, git_oid *out)
+int casi_repo_write_blob_raw(casi_repo *repo, const void *data, size_t len, git_oid *out)
 {
     if (git_blob_create_from_buffer(out, repo->git, data, len) != 0)
         return casi_error_set_git(CASI_EIO, "cannot write %zu bytes to the store", len);
     return CASI_OK;
 }
 
-int casi_repo_read_blob(casi_repo *repo, const git_oid *oid, casi_buf *out)
+int casi_repo_write_blob(casi_repo *repo, const void *data, size_t len, git_oid *out)
+{
+    casi_buf encrypted = CASI_BUF_INIT;
+    const void *stored = data;
+    size_t stored_len = len;
+    int rc = CASI_OK;
+
+    if (repo->crypto.enabled) {
+        if ((rc = casi_crypto_encrypt(&repo->crypto, "casi blob v1", data, len,
+                                      &encrypted)) != CASI_OK)
+            goto done;
+        stored = encrypted.ptr;
+        stored_len = encrypted.len;
+    }
+    rc = casi_repo_write_blob_raw(repo, stored, stored_len, out);
+
+done:
+    casi_buf_dispose(&encrypted);
+    return rc;
+}
+
+int casi_repo_read_blob_raw(casi_repo *repo, const git_oid *oid, casi_buf *out)
 {
     git_blob *blob = NULL;
     int rc;
 
     if (git_blob_lookup(&blob, repo->git, oid) != 0)
         return casi_error_set_git(CASI_ENOTFOUND, "object missing from the store");
-
     rc = casi_buf_set(out, git_blob_rawcontent(blob), (size_t)git_blob_rawsize(blob));
     git_blob_free(blob);
+    return rc;
+}
+
+int casi_repo_read_blob(casi_repo *repo, const git_oid *oid, casi_buf *out)
+{
+    casi_buf raw = CASI_BUF_INIT;
+    int rc;
+
+    if ((rc = casi_repo_read_blob_raw(repo, oid, &raw)) != CASI_OK)
+        goto done;
+    if (repo->crypto.enabled)
+        rc = casi_crypto_decrypt(&repo->crypto, "casi blob v1", raw.ptr, raw.len, out);
+    else
+        rc = casi_buf_set(out, raw.ptr, raw.len);
+
+done:
+    casi_buf_dispose(&raw);
     return rc;
 }
 
 int casi_repo_blob_size(casi_repo *repo, const git_oid *oid, uint64_t *out)
 {
     git_blob *blob = NULL;
-    int rc = CASI_OK;
+    uint64_t size;
 
     if (git_blob_lookup(&blob, repo->git, oid) != 0)
         return casi_error_set_git(CASI_ENOTFOUND, "cannot read blob size");
-    *out = (uint64_t)git_blob_rawsize(blob);
+    size = (uint64_t)git_blob_rawsize(blob);
     git_blob_free(blob);
-    return rc;
+    if (repo->crypto.enabled) {
+        if (size < CASI_CRYPTO_BLOB_OVERHEAD)
+            return casi_error_set(CASI_EINVAL, "encrypted blob is too short");
+        size -= CASI_CRYPTO_BLOB_OVERHEAD;
+    }
+    *out = size;
+    return CASI_OK;
 }
 
 int casi_repo_has_object(casi_repo *repo, const git_oid *oid)
@@ -224,6 +301,17 @@ int casi_tree_add_text(casi_tree *tree, const char *path, const char *text)
     int rc;
 
     if ((rc = casi_repo_write_blob(tree->repo, text, strlen(text), &oid)) != CASI_OK)
+        return rc;
+
+    return casi_tree_add(tree, path, &oid);
+}
+
+int casi_tree_add_text_raw(casi_tree *tree, const char *path, const char *text)
+{
+    git_oid oid;
+    int rc;
+
+    if ((rc = casi_repo_write_blob_raw(tree->repo, text, strlen(text), &oid)) != CASI_OK)
         return rc;
 
     return casi_tree_add(tree, path, &oid);
@@ -361,8 +449,8 @@ int casi_repo_tree_entry_oid(casi_repo *repo, const git_oid *tree_oid,
     return CASI_OK;
 }
 
-int casi_repo_tree_entry_blob(casi_repo *repo, const git_oid *tree_oid,
-                              const char *path, casi_buf *out)
+static int tree_entry_blob(casi_repo *repo, const git_oid *tree_oid,
+                           const char *path, casi_buf *out, bool raw)
 {
     git_tree *tree = NULL;
     git_tree_entry *entry = NULL;
@@ -376,11 +464,24 @@ int casi_repo_tree_entry_blob(casi_repo *repo, const git_oid *tree_oid,
         return casi_error_set(CASI_ENOTFOUND, "not in the store: %s", path);
     }
 
-    rc = casi_repo_read_blob(repo, git_tree_entry_id(entry), out);
+    rc = raw ? casi_repo_read_blob_raw(repo, git_tree_entry_id(entry), out)
+             : casi_repo_read_blob(repo, git_tree_entry_id(entry), out);
 
     git_tree_entry_free(entry);
     git_tree_free(tree);
     return rc;
+}
+
+int casi_repo_tree_entry_blob(casi_repo *repo, const git_oid *tree_oid,
+                              const char *path, casi_buf *out)
+{
+    return tree_entry_blob(repo, tree_oid, path, out, false);
+}
+
+int casi_repo_tree_entry_blob_raw(casi_repo *repo, const git_oid *tree_oid,
+                                  const char *path, casi_buf *out)
+{
+    return tree_entry_blob(repo, tree_oid, path, out, true);
 }
 
 int casi_repo_tree_list(casi_repo *repo, const git_oid *tree_oid, const char *path,

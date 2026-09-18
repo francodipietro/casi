@@ -75,6 +75,7 @@ int casi_ctx_open(casi_ctx *ctx)
 
     if ((rc = casi_repo_open(&ctx->repo)) != CASI_OK)
         goto fail;
+    casi_repo_set_crypto(ctx->repo, &ctx->crypto);
 
     casi_buf_dispose(&value);
     return CASI_OK;

@@ -222,7 +222,7 @@ int casi_shared_config_load_remote(casi_repo *repo, const casi_crypto *crypto,
     }
     if (rc != CASI_OK)
         goto done;
-    if ((rc = casi_repo_tree_entry_blob(repo, &tree, "casi.json", &json)) != CASI_OK)
+    if ((rc = casi_repo_tree_entry_blob_raw(repo, &tree, "casi.json", &json)) != CASI_OK)
         goto done;
     format = casi_json_find_uint(json.ptr, json.len, "format");
     if (format == CASI_SHARED_CONFIG_FORMAT) {
@@ -236,8 +236,8 @@ int casi_shared_config_load_remote(casi_repo *repo, const casi_crypto *crypto,
     } else if (format == 2) {
         if ((rc = encrypted_header_matches(crypto, &json)) != CASI_OK ||
             (rc = casi_crypto_path_component(crypto, "config", &payload_name)) != CASI_OK ||
-            (rc = casi_repo_tree_entry_blob(repo, &tree, casi_buf_cstr(&payload_name),
-                                             &payload)) != CASI_OK ||
+            (rc = casi_repo_tree_entry_blob_raw(repo, &tree, casi_buf_cstr(&payload_name),
+                                                 &payload)) != CASI_OK ||
             (rc = casi_crypto_decrypt(crypto, casi_buf_cstr(&payload_name), payload.ptr,
                                       payload.len, &json)) != CASI_OK ||
             (rc = casi_shared_config_parse(cfg, json.ptr, json.len)) != CASI_OK)
@@ -286,8 +286,8 @@ int casi_shared_config_commit_push(casi_repo *repo, const casi_shared_config *cf
                                   "{\"format\":2,\"crypto\":{\"mode\":\"%s\",\"keyId\":\"%s\"}}\n",
                                   CASI_CRYPTO_MODE_CONVERGENT,
                                   casi_buf_cstr(&key_id))) != CASI_OK ||
-            (rc = casi_repo_write_blob(repo, cipher.ptr, cipher.len, &payload_oid)) != CASI_OK ||
-            (rc = casi_tree_add_text(tree, "casi.json", casi_buf_cstr(&json))) != CASI_OK ||
+            (rc = casi_repo_write_blob_raw(repo, cipher.ptr, cipher.len, &payload_oid)) != CASI_OK ||
+            (rc = casi_tree_add_text_raw(tree, "casi.json", casi_buf_cstr(&json))) != CASI_OK ||
             (rc = casi_tree_add(tree, casi_buf_cstr(&payload_name), &payload_oid)) != CASI_OK)
             goto done;
     } else if ((rc = casi_tree_add_text(tree, "casi.json", casi_buf_cstr(&json))) != CASI_OK) {

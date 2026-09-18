@@ -36,7 +36,7 @@ static void test_roundtrip_and_stat_invalidation(void)
     ASSERT_EQ_INT(git_oid_fromstr(&chunks[0], "0123456789012345678901234567890123456789"), 0);
     ASSERT_EQ_INT(git_oid_fromstr(&chunks[1], "abcdefabcdefabcdefabcdefabcdefabcdefabcd"), 0);
 
-    ASSERT_OK(casi_index_open(roots, &index));
+    ASSERT_OK(casi_index_open(roots, NULL, &index));
     ASSERT_TRUE(casi_index_find(index, "claude-code", casi_buf_cstr(&path)) == NULL);
     ASSERT_OK(casi_index_update(index, "claude-code", casi_buf_cstr(&path), &before,
                                 0, 0, 4, chunks, 2));
@@ -44,7 +44,7 @@ static void test_roundtrip_and_stat_invalidation(void)
     casi_index_free(index);
     index = NULL;
 
-    ASSERT_OK(casi_index_open(roots, &index));
+    ASSERT_OK(casi_index_open(roots, NULL, &index));
     entry = casi_index_find(index, "claude-code", casi_buf_cstr(&path));
     ASSERT_TRUE(entry != NULL);
     ASSERT_TRUE(casi_index_entry_matches(entry, &before));
@@ -76,7 +76,7 @@ static void test_roundtrip_and_stat_invalidation(void)
     ASSERT_OK(casi_fs_read_file(casi_paths_index(), &corrupt));
     corrupt.ptr[corrupt.len - 1] ^= 1;
     ASSERT_OK(casi_fs_write_file_atomic(casi_paths_index(), corrupt.ptr, corrupt.len));
-    ASSERT_OK(casi_index_open(roots, &index));
+    ASSERT_OK(casi_index_open(roots, NULL, &index));
     ASSERT_TRUE(casi_index_find(index, "claude-code", casi_buf_cstr(&path)) == NULL);
     casi_index_free(index);
     casi_roots_free(roots);
@@ -92,7 +92,7 @@ static void test_root_snapshot_invalidates_every_entry(void)
 
     ASSERT_OK(make_roots(&roots, "/tmp/other-src"));
     ASSERT_OK(casi_buf_printf(&path, "%s/session.jsonl", g_home));
-    ASSERT_OK(casi_index_open(roots, &index));
+    ASSERT_OK(casi_index_open(roots, NULL, &index));
     ASSERT_TRUE(casi_index_find(index, "claude-code", casi_buf_cstr(&path)) == NULL);
 
     casi_index_free(index);

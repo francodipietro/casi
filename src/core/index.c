@@ -35,7 +35,8 @@ static void entry_dispose(struct index_owned_entry *entry)
     memset(entry, 0, sizeof(*entry));
 }
 
-static int roots_key_build(const casi_roots *roots, casi_buf *out)
+static int roots_key_build(const casi_roots *roots, const char *crypto_key_id,
+                           casi_buf *out)
 {
     size_t i;
     int rc;
@@ -48,6 +49,11 @@ static int roots_key_build(const casi_roots *roots, casi_buf *out)
             (rc = casi_buf_putc(out, '\0')) != CASI_OK)
             return rc;
     }
+    if ((rc = casi_buf_puts(out, "crypto")) != CASI_OK ||
+        (rc = casi_buf_putc(out, '\0')) != CASI_OK ||
+        (rc = casi_buf_puts(out, crypto_key_id != NULL ? crypto_key_id : "none")) != CASI_OK ||
+        (rc = casi_buf_putc(out, '\0')) != CASI_OK)
+        return rc;
     return CASI_OK;
 }
 
@@ -304,7 +310,7 @@ done:
     return rc;
 }
 
-int casi_index_open(const casi_roots *roots, casi_index **out)
+int casi_index_open(const casi_roots *roots, const char *crypto_key_id, casi_index **out)
 {
     casi_index *index;
     int rc;
@@ -312,7 +318,7 @@ int casi_index_open(const casi_roots *roots, casi_index **out)
     index = calloc(1, sizeof(*index));
     if (index == NULL)
         return casi_error_set(CASI_ENOMEM, "out of memory opening stat cache");
-    if ((rc = roots_key_build(roots, &index->roots_key)) != CASI_OK)
+    if ((rc = roots_key_build(roots, crypto_key_id, &index->roots_key)) != CASI_OK)
         goto fail;
     if ((rc = index_read(index)) != CASI_OK)
         goto fail;
