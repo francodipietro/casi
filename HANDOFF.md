@@ -6,11 +6,12 @@ his day job). It preserves the empirical findings that a later agent must not
 re-derive or assume — several came from live experimentation rather than
 documentation.
 
-> **Phase 2 closeout (2026-09-06).** Phase 1 was squash-merged as PR #2
+> **Phase 3 closeout (2026-09-17).** Phase 1 was squash-merged as PR #2
 > (`a3f0e41`), its follow-up as PR #3 (`d333228`), CI scoping as PR #4
-> (`d869551`), and Phase 2 as PR #5 (`c9a19b5`). The Phase 1 branch snapshot
-> and pre-PR checklist are historical. Sections 2, 4, 6 and 7 now give the
-> current baseline; retain the rest for its empirical evidence and rationale.
+> (`d869551`), Phase 2 as PR #5 (`c9a19b5`), and Phase 3 as PR #7
+> (`6554208`). The Phase 1 snapshot and the pre-Phase-3 checklist are
+> historical. Sections 2, 4, 6 and 7 give the current baseline; retain the
+> rest for its empirical evidence and rationale.
 
 Read this whole file before touching git or writing code. Section 2 in
 particular describes a real risk to the actual work product.
@@ -35,19 +36,27 @@ Those four files are the durable record. This file preserves the empirical
 handoff evidence plus the Phase 2 closeout baseline; use it alongside the
 current git state rather than as a replacement for the durable docs.
 
-## 2. Current state — Phase 3 baseline
+## 2. Current state — Phase 4 baseline
 
 - Repo: `github.com/francodipietro/casi` (private). Remote `origin` uses SSH.
-- `main`: `c9a19b5 feat(paths): phase 2 path normalization`, the squash merge
-  of PR #5. It includes Phase 0, Phase 1 and its SSH/roundtrip follow-up,
-  scoped CI, and Phase 2.
+- `main`: `6554208 feat(performance): complete phase 3 robustness`, the squash
+  merge of PR #7. It includes Phase 0, Phase 1 and its SSH/roundtrip follow-up,
+  scoped CI, and Phases 2 and 3.
 - Phase 2 made `refs/heads/casi/config` the authoritative shared
   configuration. It publishes named roots and `sync.exclude`, migrates legacy
   local exclusions on first publish, diagnoses shared root mappings with
   `casi doctor`, and syncs Claude Code subagents and project memory.
-- The last merged PR had a final Copilot review with no actionable comments;
-  its CI run was green on Linux/macOS debug and sanitizer jobs, valgrind,
-  vendored-libgit2/exec-SSH, and GitGuardian.
+- Phase 3 added the local disposable stat cache, append-tail rescanning, the
+  200 MiB transfer-bound integration test, hidden `casi conflicts` and
+  `casi gc` plumbing commands, and an interruption audit with regressions.
+  The cache is `CASIIDX3`: it is atomically replaced, tied to the exact roots
+  table and source stat tuple, verifies cached OIDs are blobs, and has a
+  checksum over its private serialized form. See `docs/DESIGN.md` rather than
+  duplicating its validity contract.
+- PR #7 received an independent local-agent review. Its actionable cache and
+  GC-test findings were fixed and re-reviewed clean; no GitHub reviewer was
+  requested. CI was green on the full Linux/macOS matrix, valgrind,
+  vendored-libgit2/exec-SSH, GitGuardian, and the final `CI` gate.
 
 Before beginning a new phase, refresh and inspect the actual baseline rather
 than relying on a local branch:
@@ -64,7 +73,7 @@ Commits](https://gist.github.com/joshbuchea/6f47e86d2510bce28f8e7f42ae84c716)
 squash merge only with Franco's explicit authorization. The PR title is the
 eventual commit message on `main`.
 
-## 3. What's built (through Phase 2)
+## 3. What's built (through Phase 3)
 
 Phase 2 added the shared-configuration module, `casi doctor`, shared exclusion
 mutation, and provider/store support for auxiliary assets. The relevant test
@@ -73,6 +82,14 @@ coverage is `test_shared_config` plus `shared_config`, `doctor`,
 is deliberately recorded in `docs/DESIGN.md`; do not recreate a second source
 of truth here.
 
+Phase 3 added `core/index.c` and `include/casi/index.h` for the local stat
+cache; `store.c` reuses unchanged OIDs and, on an append, only rereads the
+former final chunk plus the new tail. The hidden `casi conflicts` command lists
+parked copies without changing them. `casi gc` repacks/prunes only the local
+bare store through fixed-argv `git gc --prune=now`; ordinary sync remains
+libgit2-only. `large_session`, `gc`, and `interruption` are integration tests;
+`test_index` covers cache structure, invalidation, and checksum rejection.
+
 The inventory below is the original Phase 1 snapshot. Read it as background
 for the stable MVP machinery, not as a complete current file tree.
 
@@ -80,7 +97,8 @@ for the stable MVP machinery, not as a complete current file tree.
 src/
   main.c                 dispatch; global -v/-q/--no-color parsed before the verb
   cmd/                   one file per verb: init, push, pull, sync, status,
-                         exclude (also serves `include`), config, version, help
+                         exclude (also serves `include`), config, version, help,
+                         plus hidden doctor, conflicts, gc
   cmd/sync_ops.{c,h}     shared push/pull machinery (fetch, build tree, walk
                          entries, apply the prefix rule) both commands call
   core/
@@ -89,6 +107,7 @@ src/
     chunk.c              the ~1 MiB line-boundary splitter
     repo.c               bare repo, blobs/trees/commits, fetch/push, SSH
                          credential + host-key callbacks (see §5.3)
+    index.c              private local stat cache for transcript scans
     store.c              session <-> git tree: scan local sessions into
                          casi_entry_list, read/write the remote tree layout,
                          materialize a tree back into ~/.claude/projects/
@@ -108,10 +127,10 @@ src/
 include/casi/            one header per module above, plus casi.h aggregating
 tests/
   unit/                  test_{buf,str,fs,paths,config} (Phase 0) +
-                         test_{encoding,roots,chunk} (Phase 1)
-  integration/           two_machines.sh, conflict.sh — real casi binary,
-                         real (temporary) git repos, `file://` remote, no
-                         network
+                         test_{encoding,roots,chunk,index} (Phases 1–3)
+  integration/           two_machines.sh, conflict.sh, large_session.sh,
+                         gc.sh, interruption.sh — real casi binary, real
+                         (temporary) git repos, `file://` remote, no network
   cli_errors.sh          process-level checks (Phase 0)
 ```
 
@@ -128,18 +147,24 @@ casi include <path>          # resume syncing it
 casi config <key> [<value>] | --list | --unset <key>
 ```
 
-Phase 2 also ships the hidden plumbing command `casi doctor`, which reports
-the active SSH backend, remote reachability, and shared-root mappings.
+The hidden plumbing commands are `casi doctor` (active SSH backend, remote
+reachability, shared-root mappings), `casi conflicts` (parked copies), and
+`casi gc` (local store maintenance).
 
 Exit codes match PLAN.md §4: `0` ok, `1` error, `2` usage, `3` conflict, `4`
 network, `5` an unmapped root.
 
 ## 4. What's actually verified, and how
 
-- `ctest --preset dev` (ASan+UBSan): **20/20 green** at the Phase 2 closeout.
-  The suite includes `test_shared_config` and the four new Phase 2 integration
-  tests. CI confirmed that same phase on Linux/macOS debug and sanitizer jobs,
-  valgrind, and vendored libgit2 with the exec SSH transport.
+- `ctest --preset dev` (ASan+UBSan): **24/24 green** at the Phase 3 closeout.
+  The long `large_session` test was also run independently: it generates an
+  approximately 200 MiB JSONL transcript, corrupts the cached raw-tail offset,
+  appends a short record batch, requires less than 1 MiB of new remote pack
+  data, and verifies a second machine restores the exact bytes. The observed
+  transfer was 168 KiB. The other 23 tests passed separately after it.
+- CI confirmed Phase 3 on Linux/macOS debug and sanitizer jobs, valgrind,
+  vendored libgit2 with the exec SSH transport, GitGuardian, and the required
+  `CI` gate.
 - Phase 2 integration tests prove shared-exclusion migration and enforcement
   on a new machine, `doctor`'s unmapped-root exit and remediation, subagent and
   memory synchronisation/conflict parking, and the nested-root-to-flat-root
@@ -173,6 +198,11 @@ network, `5` an unmapped root.
 - Chunking's core promise (stable byte-identical prefixes as an append-only
   file grows) was checked against the actual 137 MB / 32,154-line session
   file on the development machine, not just synthetic data.
+- `gc.sh` proves that `casi gc` leaves the store valid (`git fsck
+  --no-dangling`) and that a subsequent append reaches the remote. The
+  interruption regression keeps malformed `.casi-tmp-*` siblings on both
+  source and recipient machines and proves they never get materialized or
+  uploaded.
 
 ## 5. Bugs found while verifying, now fixed and covered
 
@@ -220,36 +250,45 @@ matters more than the diff.
    YAML scalar being parsed as a mapping). None of the three were visible
    from macOS. **Lesson applied since:** a CI change isn't done until its own
    run is actually green, not until it merges without visible local errors.
+6. **A local stat cache can corrupt a future append.** A cache record that
+   claimed zero chunks for a non-empty session, named a missing/non-blob OID,
+   or held an altered tail offset could make the scanner reuse an invalid
+   prefix. The fix is layered: reject structurally impossible entries, verify
+   every cached OID is a blob and that its sizes add up, and checksum the
+   complete private `CASIIDX3` serialization. The 200 MiB integration test
+   modifies the *actual* `tail_raw_offset` field before an append; an earlier
+   version of that test was nine bytes off and merely invalidated inode/mtime,
+   a false positive caught in independent review. The final test proves the
+   altered cache is a miss and the restored transcript is byte-exact. This is
+   still a Git-index-style local performance cache, not a security boundary
+   against someone who can rewrite both the cache and its checksum.
+7. **A successful GC is not enough if the next push breaks.** The first GC
+   regression only ran `git fsck`, which says the local object database is
+   valid but not that casi can continue writing after repack/prune. `gc.sh`
+   now appends a record, pushes it, and reads that record from the remote.
+   `casi_fs_git_gc()` also retries `waitpid` when interrupted by `EINTR`.
 
-## 6. Known gaps — Phase 3 baseline
+## 6. Known gaps — Phase 4 baseline
 
-1. **No stat-cache or append-tail hashing.** `casi_paths_index()` reserves the
-   on-disk location, but scans still read and normalise complete transcripts.
-   This is the main performance feature left for Phase 3.
-2. **The large-session proof is still manual.** The chunking strategy was
-   exercised against the real 137 MB session recorded in §4, but the planned
-   synthetic 200 MB push/append/push transfer-budget test is still absent.
-3. **Conflict recovery is not yet discoverable as a command.** Parking and
-   `casi pull --theirs` work; the planned `casi conflicts` command does not.
-   GC/repack plumbing is also still absent.
-4. **Interruption handling needs an explicit audit.** Transcript and auxiliary
-   materialisation use atomic writes, but Phase 3 should check every mutable
-   state transition and add regression coverage for interruption boundaries.
-5. **SSH coverage is not autonomous.** The SSH fallback was hardened in PR #3
+1. **SSH coverage is not autonomous.** The SSH fallback was hardened in PR #3
    and CI exercises the vendored `exec` transport, but PLAN.md's local-`sshd`
    integration job is still missing.
+2. **The real-dataset latency target remains unrecorded.** The cache and the
+   synthetic 200 MiB transfer bound are automated, but the original plan's
+   explicit `casi status` sub-second measurement on the real 390 MB dataset
+   has not yet been repeated and captured as evidence.
 
 Deliberately later: opt-in encryption (Phase 4), distribution (Phase 5),
 deletions (Phase 6), Windows (Phase 7), and a second provider (Phase 8).
 
-## 7. Before opening the Phase 3 PR
+## 7. Phase 3 closeout evidence
 
-- [ ] Define the stat-cache record and invalidation contract before modifying
-      scan/store code; preserve the existing chunk-prefix correctness rules.
-- [ ] Add `large_session` first enough to measure the promised transfer bound,
-      then use it to drive append-tail hashing.
-- [ ] Decide whether `casi conflicts`, GC/repack, and interruption coverage
-      belong in the same Phase 3 PR or whether the phase needs a narrower
-      acceptance criterion.
-- [ ] Run `ctest --preset dev`, request Copilot review, and confirm PR CI is
-      green before asking for an explicitly authorized squash merge.
+- [x] Define and document the stat-cache record/invalidation contract without
+      changing the chunk-prefix rule.
+- [x] Add `large_session`, use it to drive append-tail rescanning, and enforce
+      a sub-1 MiB remote-pack delta for a short append.
+- [x] Deliver `casi conflicts`, GC/repack, and interruption coverage in the
+      same Phase 3 PR.
+- [x] Run the 24-test local suite, resolve an independent local review, verify
+      the full CI matrix and final `CI` gate, then squash-merge PR #7 with
+      Franco's authorization.

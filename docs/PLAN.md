@@ -6,7 +6,7 @@ decisions in this codebase: the JSONL format investigation, the chunking
 rationale, the prefix conflict rule, the phase breakdown.
 
 **Read [HANDOFF.md](../HANDOFF.md) first.** It preserves the empirical Phase 1
-handoff and now records the Phase 2 closeout. The original plan below remains
+handoff and now records the Phase 3 closeout. The original plan below remains
 historical; consult the current git state alongside the durable docs for
 subsequent work.
 
@@ -24,14 +24,14 @@ Known supersessions (see HANDOFF.md for detail):
   once written (e.g. `core/ctx.c` for the "everything a command needs, opened
   once" context, `util/jsonl.c` for the line-scanning helpers). The actual
   tree is in HANDOFF.md and is authoritative.
-- §8's integration test list remains the target. `roundtrip` is now covered
-  by `two_machines`; `large_session` and an autonomous `ssh_remote` CI job
-  are still missing.
-- §11's Phase 3 scope was partially delivered earlier than planned: conflict
-  parking, `pull --theirs`, `--dry-run`, `--porcelain`, and atomic
-  materialization are already implemented. The remaining Phase 3 scope is
-  stat-cache/append-tail hashing, `large_session`, `casi conflicts`, GC/repack,
-  and an interruption audit.
+- §8's integration test list remains the target. `roundtrip` is covered by
+  `two_machines` and `large_session` is covered by its 200 MiB transfer-bound
+  test; an autonomous `ssh_remote` CI job is still missing.
+- §11's Phase 3 scope is complete in PR #7: stat-cache/append-tail rescanning,
+  `large_session`, `casi conflicts`, local GC/repack, and interruption
+  regressions. Conflict parking, `pull --theirs`, `--dry-run`, `--porcelain`,
+  and atomic materialization had landed earlier. The real 390 MiB latency
+  measurement is still an evidence gap recorded in HANDOFF.md.
 
 Everything else below reflects what was actually built.
 
@@ -628,6 +628,10 @@ modela.
 + `casi conflicts` + `pull --theirs`, `--dry-run`, `--porcelain`, `gc`/repack, manejo de
 interrupciones (escrituras atómicas, sin estado a medias). *Verificable:* test `large_session`
 pasa, `casi status` sobre los 390 MB reales corre en menos de un segundo.
+
+> Entregada en PR #7. `large_session` verifica un transcript sintético de
+> aproximadamente 200 MiB, un append corto y menos de 1 MiB de pack nuevo; la
+> medición sobre el dataset real sigue pendiente de registrar.
 
 **Fase 4 — Cifrado opt-in.** libsodium, cifrado convergente por chunk (nonce derivado del
 contenido, para que la dedup y la regla de prefijo sigan funcionando byte a byte), componentes de
