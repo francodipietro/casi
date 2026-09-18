@@ -135,6 +135,21 @@ static void test_write_read_roundtrip(void)
     casi_buf_dispose(&got);
 }
 
+static void test_read_from_reads_only_the_requested_tail(void)
+{
+    casi_buf p = CASI_BUF_INIT, got = CASI_BUF_INIT;
+    const char payload[] = "first\nsecond\nthird\n";
+
+    ASSERT_OK(tmp_path(&p, "tail/session.jsonl"));
+    ASSERT_OK(casi_fs_write_file_atomic(casi_buf_cstr(&p), payload, sizeof(payload) - 1));
+    ASSERT_OK(casi_fs_read_file_from(casi_buf_cstr(&p), strlen("first\n"), &got));
+    ASSERT_EQ_STR(casi_buf_cstr(&got), "second\nthird\n");
+    ASSERT_RC(casi_fs_read_file_from(casi_buf_cstr(&p), sizeof(payload), &got), CASI_EINVAL);
+
+    casi_buf_dispose(&p);
+    casi_buf_dispose(&got);
+}
+
 static void test_write_replaces_and_leaves_no_temp(void)
 {
     casi_buf p = CASI_BUF_INIT, got = CASI_BUF_INIT;
@@ -265,6 +280,7 @@ int main(void)
     RUN_TEST(test_hostname_and_known_host_input);
     RUN_TEST(test_mkdir_p_is_idempotent);
     RUN_TEST(test_write_read_roundtrip);
+    RUN_TEST(test_read_from_reads_only_the_requested_tail);
     RUN_TEST(test_write_replaces_and_leaves_no_temp);
     RUN_TEST(test_empty_file);
     RUN_TEST(test_missing_paths_report_notfound);

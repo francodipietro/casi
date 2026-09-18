@@ -97,4 +97,7 @@ int casi_repo_push(casi_repo *repo, const char *refname);
  * machines this store has seen. */
 int casi_repo_list_machines(casi_repo *repo, casi_strvec *out);
 
+/* Prunes unreachable objects and repacks the local bare store. */
+int casi_repo_gc(casi_repo *repo);
+
 #endif /* CASI_REPO_H */

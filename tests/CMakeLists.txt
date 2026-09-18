@@ -8,6 +8,7 @@ set(CASI_UNIT_TESTS
     test_config
     test_jsonl
     test_shared_config
+    test_index
     test_encoding
     test_roots
     test_chunk
@@ -47,6 +48,9 @@ set(CASI_INTEGRATION_TESTS
     doctor
     auxiliary_files
     nested_roots
+    large_session
+    gc
+    interruption
 )
 foreach(test_name IN LISTS CASI_INTEGRATION_TESTS)
     add_test(NAME ${test_name}

@@ -39,6 +39,8 @@ int  casi_fs_mkdir_parent(const char *path);
 
 /* Replaces the contents of `out`. */
 int  casi_fs_read_file(const char *path, casi_buf *out);
+/* Replaces `out` with bytes from `offset` through EOF. */
+int  casi_fs_read_file_from(const char *path, uint64_t offset, casi_buf *out);
 /* First `max` bytes only. Transcripts reach hundreds of megabytes and the
  * fields casi reads to identify one live in the first record, so scanning a
  * session should never mean reading all of it. */
@@ -55,6 +57,11 @@ int  casi_fs_rename_replace(const char *from, const char *to);
 /* Creates a symbolic link at `path` pointing to `target`. */
 int  casi_fs_symlink(const char *target, const char *path);
 int  casi_fs_remove_file(const char *path);
+
+/* Runs `git -C <bare-repo> gc --prune=now` without invoking a shell. This is
+ * kept here with the other process/filesystem boundary for the eventual
+ * Windows port. */
+int  casi_fs_git_gc(const char *bare_repo_path);
 
 /* Entry names only, without "." and "..", sorted. */
 int  casi_fs_listdir(const char *path, casi_strvec *out);

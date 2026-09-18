@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include <dirent.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -185,6 +186,51 @@ int casi_fs_read_file(const char *path, casi_buf *out)
     return CASI_OK;
 }
 
+int casi_fs_read_file_from(const char *path, uint64_t offset, casi_buf *out)
+{
+    FILE *f;
+    casi_stat st;
+    int rc;
+
+    if ((rc = casi_fs_stat(path, &st)) != CASI_OK)
+        return rc;
+    if (st.is_dir)
+        return casi_error_set(CASI_EINVAL, "is a directory: %s", path);
+    if (offset > st.size)
+        return casi_error_set(CASI_EINVAL, "offset is past end of file: %s", path);
+    if ((f = fopen(path, "rb")) == NULL)
+        return casi_error_set(CASI_EIO, "cannot open %s: %s", path, strerror(errno));
+    if (fseeko(f, (off_t)offset, SEEK_SET) != 0) {
+        fclose(f);
+        return casi_error_set(CASI_EIO, "cannot seek %s: %s", path, strerror(errno));
+    }
+
+    casi_buf_clear(out);
+    if ((rc = casi_buf_grow(out, (size_t)(st.size - offset))) != CASI_OK) {
+        fclose(f);
+        return rc;
+    }
+    for (;;) {
+        size_t got;
+
+        if ((rc = casi_buf_grow(out, 65536)) != CASI_OK) {
+            fclose(f);
+            return rc;
+        }
+        got = fread(out->ptr + out->len, 1, out->cap - out->len - 1, f);
+        out->len += got;
+        out->ptr[out->len] = '\0';
+        if (got == 0)
+            break;
+    }
+    if (ferror(f)) {
+        fclose(f);
+        return casi_error_set(CASI_EIO, "error reading %s", path);
+    }
+    fclose(f);
+    return CASI_OK;
+}
+
 int casi_fs_read_file_prefix(const char *path, size_t max, casi_buf *out)
 {
     FILE *f;
@@ -302,6 +348,35 @@ int casi_fs_remove_file(const char *path)
             return CASI_OK;
         return casi_error_set(CASI_EIO, "cannot remove %s: %s", path, strerror(errno));
     }
+    return CASI_OK;
+}
+
+int casi_fs_git_gc(const char *bare_repo_path)
+{
+    pid_t pid;
+    pid_t waited;
+    int status;
+
+    if (bare_repo_path == NULL || bare_repo_path[0] == '\0')
+        return casi_error_set(CASI_EINVAL, "empty bare repository path");
+    pid = fork();
+    if (pid < 0)
+        return casi_error_set(CASI_EIO, "cannot start git gc: %s", strerror(errno));
+    if (pid == 0) {
+        execlp("git", "git", "-C", bare_repo_path, "gc", "--prune=now", (char *)NULL);
+        _exit(127);
+    }
+    do {
+        waited = waitpid(pid, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    if (waited < 0)
+        return casi_error_set(CASI_EIO, "cannot wait for git gc: %s", strerror(errno));
+    if (!WIFEXITED(status))
+        return casi_error_set(CASI_EIO, "git gc did not exit normally");
+    if (WEXITSTATUS(status) == 127)
+        return casi_error_set(CASI_ENOTFOUND, "cannot run git; install Git to use `casi gc`");
+    if (WEXITSTATUS(status) != 0)
+        return casi_error_set(CASI_EIO, "git gc failed with exit status %d", WEXITSTATUS(status));
     return CASI_OK;
 }
 

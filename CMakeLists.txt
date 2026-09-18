@@ -101,6 +101,7 @@ add_library(casi_core STATIC
     src/path/encoding.c
     src/path/roots.c
     src/core/chunk.c
+    src/core/index.c
     src/core/repo.c
     src/core/shared_config.c
     src/core/store.c
@@ -129,6 +130,8 @@ add_executable(casi
     src/cmd/cmd_help.c
     src/cmd/cmd_config.c
     src/cmd/cmd_doctor.c
+    src/cmd/cmd_conflicts.c
+    src/cmd/cmd_gc.c
     src/cmd/cmd_init.c
     src/cmd/cmd_status.c
     src/cmd/cmd_push.c
