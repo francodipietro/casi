@@ -12,6 +12,7 @@ set(CASI_UNIT_TESTS
     test_encoding
     test_roots
     test_chunk
+    test_crypto
 )
 
 foreach(test_name IN LISTS CASI_UNIT_TESTS)
