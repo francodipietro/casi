@@ -32,5 +32,6 @@ int casi_cmd_version(int argc, char **argv);
 int casi_cmd_help(int argc, char **argv);
 int casi_cmd_config(int argc, char **argv);
 int casi_cmd_doctor(int argc, char **argv);
+int casi_cmd_conflicts(int argc, char **argv);
 
 #endif /* CASI_CMD_H */

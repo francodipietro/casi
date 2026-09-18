@@ -85,6 +85,11 @@ parked=$(find "$work/b/casi/conflicts" -name '*-remote*.jsonl' 2>/dev/null | hea
 grep -q 'edited on A' "$parked" || fail "parked copy does not contain the remote content"
 echo "  ok   pull: remote copy parked at $parked"
 
+out=$("$casi" conflicts) || fail "conflicts command"
+echo "$out" | grep -q "$(basename "$parked")" ||
+    fail "conflicts: parked remote copy was not listed"
+echo "  ok   conflicts: parked copy is discoverable"
+
 "$casi" pull --theirs aaaaaaaa-0000-0000-0000-000000000000 >/dev/null || fail "pull --theirs"
 local_parked=$(find "$work/b/casi/conflicts" -name '*-local*.jsonl' 2>/dev/null | head -1)
 [ -n "$local_parked" ] || fail "pull --theirs: local divergent copy was not parked"
@@ -94,4 +99,4 @@ echo "  ok   pull --theirs: local copy parked at $local_parked"
 grep -q 'edited on A' "$sess_b" || fail "--theirs did not take the remote copy"
 echo "  ok   pull --theirs: remote copy adopted"
 
-echo "conflict: 7 passed"
+echo "conflict: 8 passed"

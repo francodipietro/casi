@@ -130,6 +130,7 @@ add_executable(casi
     src/cmd/cmd_help.c
     src/cmd/cmd_config.c
     src/cmd/cmd_doctor.c
+    src/cmd/cmd_conflicts.c
     src/cmd/cmd_init.c
     src/cmd/cmd_status.c
     src/cmd/cmd_push.c
