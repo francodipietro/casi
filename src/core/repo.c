@@ -742,3 +742,15 @@ int casi_repo_list_machines(casi_repo *repo, casi_strvec *out)
         casi_strvec_sort(out);
     return rc;
 }
+
+int casi_repo_gc(casi_repo *repo)
+{
+    const char *path;
+
+    if (repo == NULL)
+        return casi_error_set(CASI_EINVAL, "cannot garbage-collect a null repository");
+    path = git_repository_path(repo->git);
+    if (path == NULL)
+        return casi_error_set(CASI_EIO, "cannot determine local store path");
+    return casi_fs_git_gc(path);
+}

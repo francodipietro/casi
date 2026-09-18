@@ -15,6 +15,15 @@ ending translation, the Unix file mode bit, symlinks, and libgit2's checkout
 semantics. Those are also the four things that make a Windows port painful, so
 the decision pays twice.
 
+`casi gc` is the one deliberately narrow exception to the otherwise libgit2
+only store machinery. libgit2 can build packfiles, but has no public operation
+that also safely prunes the unreachable loose objects. casi delegates that
+maintenance operation to the installed Git executable as `git -C <store> gc
+--prune=now`, invoked with fixed argv rather than a shell. Git supplies the
+repository locking needed while it repacks; the wrapper lives in `util/fs.c`
+so a future Windows port has one process boundary to replace. Normal sync
+never depends on the executable and never invokes it.
+
 ## Session files are chunked, not stored whole
 
 Claude Code transcripts are append-only JSONL and can reach hundreds of
@@ -40,11 +49,12 @@ with the git store: its keys contain absolute local paths and local root paths.
 An entry is keyed by provider plus transcript path and records the source
 `size`, nanosecond `mtime`, inode, normalized length, ordered chunk OIDs, and
 the raw and normalized offsets where the final chunk begins. The file header
-also carries an exact snapshot of the configured roots. A different root
-table, cache format, structurally malformed cache, missing or non-blob OID,
-inode change, size change, or mtime change at an equal size is a cache miss
-and causes a full scan. The cache is rewritten atomically only after the file
-has the same stat tuple both
+also carries an exact snapshot of the configured roots, and the whole private
+file carries a cryptographic checksum. A different root table, cache format,
+checksum, structurally malformed cache, missing or non-blob OID, inode change,
+size change, or mtime change at an equal size is a cache miss and causes a
+full scan. The cache is rewritten atomically only after the file has the same
+stat tuple both
 before and after scanning, so a transcript changing underneath casi never
 creates a trusted record for a mixed read.
 
@@ -53,7 +63,11 @@ final chunk and reads from that final chunk's source-line boundary through EOF.
 It normalises and chunks that tail again; this is necessary because the former
 tail is the one mutable chunk. Normalisation never changes newline bytes, so
 counting newlines maps that new normalized tail boundary back to the correct
-raw byte offset without holding a per-byte translation table.
+raw byte offset without holding a per-byte translation table. Before reusing
+the prefix, casi also requires the cached final blob to be a byte prefix of
+the newly normalised tail. An altered offset fails the cache checksum and
+falls back to a full scan instead of splicing unrelated bytes to a valid
+prefix.
 
 Like Git's stat cache, the growth fast path trusts the filesystem metadata to
 mean "the old bytes stayed put and new bytes were appended". A program that
@@ -62,6 +76,26 @@ metadata-only cache; detecting that case requires rereading the prefix and
 removes the performance win. Claude Code's observed transcript writer is
 append-only, while ordinary rewrites with the same or smaller size continue to
 fall back to a full scan and reach the normal prefix-conflict logic.
+
+## Interrupted commands leave retryable state
+
+casi does not offer a cross-file transaction for a pull: interrupting a pull
+can leave some sessions already materialised and later ones not yet touched.
+That is intentional and safe. Each transcript, sidecar, memory file, config,
+and stat-cache update is written to a sibling temporary and atomically renamed
+only when complete. Running `casi pull` again converges the remaining files;
+the already-written files compare equal and are skipped.
+
+The temporary suffix is `.casi-tmp-<pid>`, after `.jsonl`, so it no longer
+matches the provider's transcript-file rule. A process killed before rename
+therefore cannot turn a partial file into a future upload. The integration
+suite keeps such stale siblings deliberately and proves they stay local.
+
+On push, blobs and trees may be created before the machine ref advances, but
+they are unreachable until libgit2 atomically updates that ref; an interrupted
+push can waste local objects, never publish a half-tree. Shared configuration
+uses the same ref-update semantics. `casi gc` uses Git's own lock-aware GC, so
+it either leaves the previous object layout intact or finishes a valid repack.
 
 ## Conflicts are decided by prefix, not by timestamp
 

@@ -58,6 +58,11 @@ int  casi_fs_rename_replace(const char *from, const char *to);
 int  casi_fs_symlink(const char *target, const char *path);
 int  casi_fs_remove_file(const char *path);
 
+/* Runs `git -C <bare-repo> gc --prune=now` without invoking a shell. This is
+ * kept here with the other process/filesystem boundary for the eventual
+ * Windows port. */
+int  casi_fs_git_gc(const char *bare_repo_path);
+
 /* Entry names only, without "." and "..", sorted. */
 int  casi_fs_listdir(const char *path, casi_strvec *out);
 

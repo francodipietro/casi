@@ -27,7 +27,7 @@ static void test_roundtrip_and_stat_invalidation(void)
     const casi_index_entry *entry;
     casi_stat before, grown;
     git_oid chunks[2];
-    casi_buf path = CASI_BUF_INIT;
+    casi_buf path = CASI_BUF_INIT, corrupt = CASI_BUF_INIT;
 
     ASSERT_OK(make_roots(&roots, "/tmp/src"));
     ASSERT_OK(casi_buf_printf(&path, "%s/session.jsonl", g_home));
@@ -69,7 +69,18 @@ static void test_roundtrip_and_stat_invalidation(void)
     ASSERT_FALSE(casi_index_entry_can_resume(entry, &grown));
 
     casi_index_free(index);
+    index = NULL;
+
+    /* An altered offset or even a checksum byte makes the whole local cache a
+     * miss.  It is cheaper and safer to scan than to reuse partial state. */
+    ASSERT_OK(casi_fs_read_file(casi_paths_index(), &corrupt));
+    corrupt.ptr[corrupt.len - 1] ^= 1;
+    ASSERT_OK(casi_fs_write_file_atomic(casi_paths_index(), corrupt.ptr, corrupt.len));
+    ASSERT_OK(casi_index_open(roots, &index));
+    ASSERT_TRUE(casi_index_find(index, "claude-code", casi_buf_cstr(&path)) == NULL);
+    casi_index_free(index);
     casi_roots_free(roots);
+    casi_buf_dispose(&corrupt);
     casi_buf_dispose(&path);
 }
 

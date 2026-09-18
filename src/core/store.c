@@ -328,6 +328,32 @@ static bool cache_entry_is_valid(casi_repo *repo, const casi_index_entry *cached
     return true;
 }
 
+/* The source offset is cache data, not a fact supplied by the filesystem.
+ * Before joining a reused prefix to a freshly read tail, prove that the old
+ * mutable chunk is exactly the prefix of that normalized tail.  This catches
+ * a stale or corrupt offset without rereading the sealed prefix. */
+static int cached_tail_matches(casi_repo *repo, const casi_index_entry *cached,
+                               const casi_buf *normalized, bool *matches)
+{
+    casi_buf old_tail = CASI_BUF_INIT;
+    int rc;
+
+    *matches = false;
+    if (cached->chunk_count == 0) {
+        *matches = normalized->len == 0;
+        return CASI_OK;
+    }
+    if ((rc = casi_repo_read_blob(repo, &cached->chunks[cached->chunk_count - 1],
+                                  &old_tail)) != CASI_OK)
+        goto done;
+    *matches = old_tail.len <= normalized->len &&
+               memcmp(old_tail.ptr, normalized->ptr, old_tail.len) == 0;
+
+done:
+    casi_buf_dispose(&old_tail);
+    return rc;
+}
+
 static int scan_one_session(casi_repo *repo, const casi_roots *roots,
                             casi_index *index, const char *provider_name,
                             const casi_session *session, casi_entry_list *out)
@@ -373,6 +399,22 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
      * with different layouts produce identical blobs. */
     if ((rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
         goto done;
+    if (resume) {
+        bool tail_matches;
+
+        if ((rc = cached_tail_matches(repo, cached, &normalized, &tail_matches)) != CASI_OK)
+            goto done;
+        if (!tail_matches) {
+            /* A corrupt offset could otherwise splice a valid old prefix to
+             * unrelated new bytes. Rebuild from byte zero instead. */
+            resume = false;
+            casi_buf_clear(&raw);
+            casi_buf_clear(&normalized);
+            if ((rc = casi_fs_read_file(session->local_path, &raw)) != CASI_OK ||
+                (rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
+                goto done;
+        }
+    }
     if ((rc = write_chunks(repo, &normalized, &writer)) != CASI_OK)
         goto done;
 

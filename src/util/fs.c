@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include <dirent.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -347,6 +348,35 @@ int casi_fs_remove_file(const char *path)
             return CASI_OK;
         return casi_error_set(CASI_EIO, "cannot remove %s: %s", path, strerror(errno));
     }
+    return CASI_OK;
+}
+
+int casi_fs_git_gc(const char *bare_repo_path)
+{
+    pid_t pid;
+    pid_t waited;
+    int status;
+
+    if (bare_repo_path == NULL || bare_repo_path[0] == '\0')
+        return casi_error_set(CASI_EINVAL, "empty bare repository path");
+    pid = fork();
+    if (pid < 0)
+        return casi_error_set(CASI_EIO, "cannot start git gc: %s", strerror(errno));
+    if (pid == 0) {
+        execlp("git", "git", "-C", bare_repo_path, "gc", "--prune=now", (char *)NULL);
+        _exit(127);
+    }
+    do {
+        waited = waitpid(pid, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    if (waited < 0)
+        return casi_error_set(CASI_EIO, "cannot wait for git gc: %s", strerror(errno));
+    if (!WIFEXITED(status))
+        return casi_error_set(CASI_EIO, "git gc did not exit normally");
+    if (WEXITSTATUS(status) == 127)
+        return casi_error_set(CASI_ENOTFOUND, "cannot run git; install Git to use `casi gc`");
+    if (WEXITSTATUS(status) != 0)
+        return casi_error_set(CASI_EIO, "git gc failed with exit status %d", WEXITSTATUS(status));
     return CASI_OK;
 }
 

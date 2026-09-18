@@ -35,6 +35,16 @@ export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude
 [ -s "$work/a/casi/index" ] || fail "initial scan did not write the stat cache"
 before=$(git -C "$work/remote.git" count-objects -v | awk '/^size-pack:/{print $2}')
 
+# The cache is private binary state.  Point its sole entry's tail offset into
+# the first byte of the source before appending.  A correct scanner must prove
+# the old final blob starts the new tail, reject this offset, rescan, and still
+# materialise the exact transcript on machine B below.
+root_key_len=$((${#project} + 5)) # "src\\0${project}\\0"
+session_len=${#session}
+tail_raw_offset=$((63 + root_key_len + session_len))
+printf '\001\000\000\000\000\000\000\000' |
+    dd of="$work/a/casi/index" bs=1 seek="$tail_raw_offset" conv=notrunc 2>/dev/null
+
 # A 75 KiB random append is deliberately much smaller than one chunk.
 dd if=/dev/urandom bs=1024 count=75 2>/dev/null |
     base64 | tr -d '\n' | fold -w 65500 |

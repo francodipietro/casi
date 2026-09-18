@@ -49,6 +49,8 @@ set(CASI_INTEGRATION_TESTS
     auxiliary_files
     nested_roots
     large_session
+    gc
+    interruption
 )
 foreach(test_name IN LISTS CASI_INTEGRATION_TESTS)
     add_test(NAME ${test_name}

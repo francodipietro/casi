@@ -8,8 +8,9 @@
 #include <string.h>
 
 /* This is a private, local cache format.  Changing it invalidates safely. */
-#define CASI_INDEX_MAGIC "CASIIDX2"
+#define CASI_INDEX_MAGIC "CASIIDX3"
 #define CASI_INDEX_MAGIC_LEN (sizeof(CASI_INDEX_MAGIC) - 1)
+#define CASI_INDEX_CHECKSUM_LEN GIT_OID_RAWSZ
 
 struct index_owned_entry {
     casi_index_entry view;
@@ -116,6 +117,25 @@ static bool size_multiply(size_t a, size_t b, size_t *out)
     return true;
 }
 
+/* The cache is local, not an adversarial input boundary, but it must not turn
+ * a torn write or a flipped offset into a plausible incremental scan.  Hash
+ * its complete serialized form; a format change also makes old files misses. */
+static bool index_checksum_matches(const casi_buf *raw)
+{
+    git_oid checksum;
+    size_t content_len;
+
+    if (raw->len < CASI_INDEX_MAGIC_LEN + CASI_INDEX_CHECKSUM_LEN)
+        return false;
+    content_len = raw->len - CASI_INDEX_CHECKSUM_LEN;
+    if (git_odb_hash(&checksum, raw->ptr, content_len, GIT_OBJECT_BLOB) < 0) {
+        casi_error_clear();
+        return false;
+    }
+    return memcmp(checksum.id, raw->ptr + content_len,
+                  CASI_INDEX_CHECKSUM_LEN) == 0;
+}
+
 static int entries_grow(casi_index *index)
 {
     struct index_owned_entry *p;
@@ -203,7 +223,7 @@ static void index_clear_entries(casi_index *index)
 static int index_read(casi_index *index)
 {
     casi_buf raw = CASI_BUF_INIT;
-    size_t offset = 0, i;
+    size_t offset = 0, content_len, i;
     uint32_t key_len, count;
     int rc;
 
@@ -216,11 +236,16 @@ static int index_read(casi_index *index)
     if (rc != CASI_OK)
         goto done;
 
-    if (raw.len < CASI_INDEX_MAGIC_LEN ||
+    if (raw.len < CASI_INDEX_MAGIC_LEN + CASI_INDEX_CHECKSUM_LEN ||
         memcmp(raw.ptr, CASI_INDEX_MAGIC, CASI_INDEX_MAGIC_LEN) != 0) {
         rc = CASI_OK;
         goto done;
     }
+    if (!index_checksum_matches(&raw)) {
+        rc = CASI_OK;
+        goto done;
+    }
+    content_len = raw.len - CASI_INDEX_CHECKSUM_LEN;
     offset = CASI_INDEX_MAGIC_LEN;
     {
         const char *stored_key;
@@ -271,6 +296,8 @@ static int index_read(casi_index *index)
             goto done;
         index->entries[index->len++] = entry;
     }
+    if (offset != content_len)
+        index_clear_entries(index);
 
 done:
     casi_buf_dispose(&raw);
@@ -376,6 +403,7 @@ int casi_index_update(casi_index *index, const char *provider, const char *path,
 int casi_index_flush(casi_index *index)
 {
     casi_buf raw = CASI_BUF_INIT;
+    git_oid checksum;
     size_t i;
     int rc = CASI_OK;
 
@@ -421,6 +449,13 @@ int casi_index_flush(casi_index *index)
             (rc = casi_buf_put(&raw, entry->chunks, oid_bytes)) != CASI_OK)
             goto done;
     }
+
+    if (git_odb_hash(&checksum, raw.ptr, raw.len, GIT_OBJECT_BLOB) < 0) {
+        rc = casi_error_set(CASI_ERROR, "cannot checksum stat cache");
+        goto done;
+    }
+    if ((rc = casi_buf_put(&raw, checksum.id, CASI_INDEX_CHECKSUM_LEN)) != CASI_OK)
+        goto done;
 
     rc = casi_fs_write_file_atomic(casi_paths_index(), raw.ptr, raw.len);
     if (rc == CASI_OK)
