@@ -5,10 +5,10 @@ verbatim below. It is the source of the *why* behind most of the non-obvious
 decisions in this codebase: the JSONL format investigation, the chunking
 rationale, the prefix conflict rule, the phase breakdown.
 
-**Read [HANDOFF.md](../HANDOFF.md) first.** It records what was actually built
-and what was empirically verified during the Phase 1 handoff. Phase 1 has since
-merged, so its branch snapshot and pre-PR checklist are historical; consult
-the current git state alongside the durable docs for subsequent work.
+**Read [HANDOFF.md](../HANDOFF.md) first.** It preserves the empirical Phase 1
+handoff and now records the Phase 2 closeout. The original plan below remains
+historical; consult the current git state alongside the durable docs for
+subsequent work.
 
 Known supersessions (see HANDOFF.md for detail):
 
@@ -16,12 +16,10 @@ Known supersessions (see HANDOFF.md for detail):
   exclude` / `casi include` for project selection -- a need surfaced after
   this plan was written, when the question "does this sync everything under
   every repo?" came up before Phase 1 started.
-- §5.1 says root names "seen on the remote are listed in casi.json". Decided
-  later, still **not implemented**: the exclude list itself (`sync.exclude`)
-  was agreed to travel via the remote's `casi.json` so a new machine respects
-  it from its first push, rather than living only in local config. What
-  exists today is local-only. This is the most important open gap -- see
-  HANDOFF.md.
+- §5.1's shared root-name namespace and shared `sync.exclude` policy landed
+  in Phase 2. The canonical configuration lives on its own authoritative ref
+  (`refs/heads/casi/config`), with optimistic updates and legacy local-exclude
+  migration; see `docs/DESIGN.md` and HANDOFF.md.
 - §7.1's file tree names modules that ended up organised slightly differently
   once written (e.g. `core/ctx.c` for the "everything a command needs, opened
   once" context, `util/jsonl.c` for the line-scanning helpers). The actual
@@ -29,6 +27,11 @@ Known supersessions (see HANDOFF.md for detail):
 - §8's integration test list remains the target. `roundtrip` is now covered
   by `two_machines`; `large_session` and an autonomous `ssh_remote` CI job
   are still missing.
+- §11's Phase 3 scope was partially delivered earlier than planned: conflict
+  parking, `pull --theirs`, `--dry-run`, `--porcelain`, and atomic
+  materialization are already implemented. The remaining Phase 3 scope is
+  stat-cache/append-tail hashing, `large_session`, `casi conflicts`, GC/repack,
+  and an interruption audit.
 
 Everything else below reflects what was actually built.
 
