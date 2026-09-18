@@ -4,7 +4,10 @@
 
 #include "casi_test.h"
 
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static void test_deterministic_authenticated_encryption(void)
 {
@@ -50,6 +53,26 @@ static void test_path_components_are_keyed_and_stable(void)
     casi_crypto_dispose(&second);
 }
 
+static void test_keyfile_is_private_and_loadable(void)
+{
+    char dir[] = "/tmp/casi-test-crypto-XXXXXX";
+    casi_buf path = CASI_BUF_INIT;
+    casi_crypto crypto;
+
+    ASSERT_TRUE(mkdtemp(dir) != NULL);
+    ASSERT_OK(casi_buf_printf(&path, "%s/key", dir));
+    ASSERT_OK(casi_crypto_generate_key_file(casi_buf_cstr(&path)));
+    ASSERT_OK(casi_crypto_load_key_file(casi_buf_cstr(&path), &crypto));
+    ASSERT_TRUE(crypto.enabled);
+    casi_crypto_dispose(&crypto);
+    ASSERT_TRUE(chmod(casi_buf_cstr(&path), 0644) == 0);
+    ASSERT_TRUE(casi_crypto_load_key_file(casi_buf_cstr(&path), &crypto) != CASI_OK);
+
+    unlink(casi_buf_cstr(&path));
+    rmdir(dir);
+    casi_buf_dispose(&path);
+}
+
 int main(void)
 {
     int status;
@@ -58,6 +81,7 @@ int main(void)
         return 1;
     RUN_TEST(test_deterministic_authenticated_encryption);
     RUN_TEST(test_path_components_are_keyed_and_stable);
+    RUN_TEST(test_keyfile_is_private_and_loadable);
     status = casi_test_report("crypto");
     casi_shutdown();
     return status;

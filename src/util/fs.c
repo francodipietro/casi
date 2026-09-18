@@ -298,7 +298,7 @@ int casi_fs_symlink(const char *target, const char *path)
     return CASI_OK;
 }
 
-int casi_fs_write_file_atomic(const char *path, const void *data, size_t len)
+static int write_file_atomic(const char *path, const void *data, size_t len, bool private)
 {
     casi_buf tmp = CASI_BUF_INIT;
     FILE *f = NULL;
@@ -313,6 +313,11 @@ int casi_fs_write_file_atomic(const char *path, const void *data, size_t len)
 
     if ((f = fopen(casi_buf_cstr(&tmp), "wb")) == NULL) {
         rc = casi_error_set(CASI_EIO, "cannot create %s: %s",
+                            casi_buf_cstr(&tmp), strerror(errno));
+        goto out;
+    }
+    if (private && fchmod(fileno(f), S_IRUSR | S_IWUSR) != 0) {
+        rc = casi_error_set(CASI_EIO, "cannot restrict %s: %s",
                             casi_buf_cstr(&tmp), strerror(errno));
         goto out;
     }
@@ -339,6 +344,33 @@ out:
         remove(casi_buf_cstr(&tmp));
     casi_buf_dispose(&tmp);
     return rc;
+}
+
+int casi_fs_write_file_atomic(const char *path, const void *data, size_t len)
+{
+    return write_file_atomic(path, data, len, false);
+}
+
+int casi_fs_write_file_atomic_private(const char *path, const void *data, size_t len)
+{
+    return write_file_atomic(path, data, len, true);
+}
+
+int casi_fs_read_file_private(const char *path, casi_buf *out)
+{
+    struct stat st;
+
+    if (stat(path, &st) != 0) {
+        if (errno == ENOENT || errno == ENOTDIR)
+            return casi_error_set(CASI_ENOTFOUND, "no such path: %s", path);
+        return casi_error_set(CASI_EIO, "cannot stat %s: %s", path, strerror(errno));
+    }
+    if (!S_ISREG(st.st_mode))
+        return casi_error_set(CASI_EINVAL, "key file is not a regular file: %s", path);
+    if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0)
+        return casi_error_set(CASI_EINVAL,
+                              "key file is readable outside its owner: %s", path);
+    return casi_fs_read_file(path, out);
 }
 
 int casi_fs_remove_file(const char *path)

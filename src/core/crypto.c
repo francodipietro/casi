@@ -2,6 +2,7 @@
 #include "casi/crypto.h"
 
 #include "casi/casi.h"
+#include "casi/fs.h"
 
 #include <limits.h>
 #include <sodium.h>
@@ -57,6 +58,42 @@ void casi_crypto_dispose(casi_crypto *crypto)
 {
     if (crypto != NULL)
         sodium_memzero(crypto, sizeof(*crypto));
+}
+
+int casi_crypto_generate_key_file(const char *path)
+{
+    unsigned char key[CASI_CRYPTO_KEY_BYTES];
+    int rc;
+
+    if (path == NULL || path[0] == '\0')
+        return casi_error_set(CASI_EINVAL, "empty encryption key path");
+    if (casi_fs_exists(path))
+        return casi_error_set(CASI_EINVAL, "encryption key already exists: %s", path);
+    randombytes_buf(key, sizeof(key));
+    rc = casi_fs_write_file_atomic_private(path, key, sizeof(key));
+    sodium_memzero(key, sizeof(key));
+    return rc;
+}
+
+int casi_crypto_load_key_file(const char *path, casi_crypto *crypto)
+{
+    casi_buf key = CASI_BUF_INIT;
+    int rc;
+
+    if (path == NULL || path[0] == '\0' || crypto == NULL)
+        return casi_error_set(CASI_EINVAL, "missing encryption key path");
+    if ((rc = casi_fs_read_file_private(path, &key)) != CASI_OK)
+        goto done;
+    if (key.len != CASI_CRYPTO_KEY_BYTES) {
+        rc = casi_error_set(CASI_EINVAL, "invalid encryption key length in %s", path);
+        goto done;
+    }
+    rc = casi_crypto_from_key(crypto, (const unsigned char *)key.ptr);
+
+done:
+    sodium_memzero(key.ptr, key.len);
+    casi_buf_dispose(&key);
+    return rc;
 }
 
 int casi_crypto_encrypt(const casi_crypto *crypto, const char *ad,

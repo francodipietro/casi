@@ -22,6 +22,10 @@ int  casi_crypto_from_key(casi_crypto *crypto,
                           const unsigned char key[CASI_CRYPTO_KEY_BYTES]);
 void casi_crypto_dispose(casi_crypto *crypto);
 
+/* The keyfile is exactly CASI_CRYPTO_KEY_BYTES random bytes and must be 0600. */
+int casi_crypto_generate_key_file(const char *path);
+int casi_crypto_load_key_file(const char *path, casi_crypto *crypto);
+
 /* Deterministic authenticated encryption. `ad` binds the ciphertext to its
  * opaque tree path, preventing a valid blob from being transplanted elsewhere. */
 int casi_crypto_encrypt(const casi_crypto *crypto, const char *ad,
