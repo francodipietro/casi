@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 #include "casi/buf.h"
+#include "casi/crypto.h"
 #include "casi/repo.h"
 #include "casi/str.h"
 
@@ -45,12 +46,13 @@ bool casi_shared_config_is_excluded(const casi_shared_config *cfg,
 
 /* Loads the fetched authoritative config ref. `present_out` distinguishes a
  * first use from an existing, intentionally empty configuration. */
-int casi_shared_config_load_remote(casi_repo *repo, casi_shared_config *cfg,
+int casi_shared_config_load_remote(casi_repo *repo, const casi_crypto *crypto,
+                                   casi_shared_config *cfg,
                                    bool *present_out);
 /* Commits cfg onto the freshly fetched config ref and pushes it. A concurrent
  * update returns CASI_ERETRY so the caller can refetch, replay its mutation,
  * and try again. */
 int casi_shared_config_commit_push(casi_repo *repo, const casi_shared_config *cfg,
-                                   const char *machine);
+                                   const casi_crypto *crypto, const char *machine);
 
 #endif /* CASI_SHARED_CONFIG_H */

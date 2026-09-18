@@ -140,12 +140,55 @@ static void test_identical_config_retries_an_unpublished_ref(void)
     /* The first failure happens after the local commit was written. The
      * second identical call must retry the push, rather than mistaking that
      * local commit for a successfully published configuration. */
-    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, "test-machine"),
+    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, NULL, "test-machine"),
               CASI_ENOTFOUND);
-    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, "test-machine"),
+    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, NULL, "test-machine"),
               CASI_ENOTFOUND);
 
     casi_shared_config_dispose(&cfg);
+    casi_repo_free(repo);
+    unsetenv("CASI_HOME");
+    casi_paths_reset();
+}
+
+static void test_encrypted_shared_config_hides_payload(void)
+{
+    char home[] = "/tmp/casi-shared-crypto-XXXXXX";
+    unsigned char key[CASI_CRYPTO_KEY_BYTES] = { 9 };
+    unsigned char wrong_key[CASI_CRYPTO_KEY_BYTES] = { 10 };
+    casi_repo *repo = NULL;
+    casi_shared_config cfg = { 0 }, loaded = { 0 };
+    casi_crypto crypto, wrong;
+    casi_buf header = CASI_BUF_INIT;
+    git_oid tree;
+    bool present;
+
+    ASSERT_TRUE(mkdtemp(home) != NULL);
+    ASSERT_EQ_INT(setenv("CASI_HOME", home, 1), 0);
+    casi_paths_reset();
+    ASSERT_OK(casi_repo_init(&repo));
+    ASSERT_OK(casi_crypto_from_key(&crypto, key));
+    ASSERT_OK(casi_crypto_from_key(&wrong, wrong_key));
+    ASSERT_OK(casi_shared_config_add_root(&cfg, "private"));
+    ASSERT_OK(casi_shared_config_add_exclude(&cfg, "casi://private/client"));
+
+    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, &crypto, "test-machine"),
+              CASI_ENOTFOUND);
+    ASSERT_OK(casi_repo_reset_ref_from(repo, CASI_SHARED_CONFIG_REMOTE_REF,
+                                       CASI_SHARED_CONFIG_REF));
+    ASSERT_OK(casi_repo_ref_tree(repo, CASI_SHARED_CONFIG_REMOTE_REF, &tree));
+    ASSERT_OK(casi_repo_tree_entry_blob(repo, &tree, "casi.json", &header));
+    ASSERT_TRUE(strstr(casi_buf_cstr(&header), "private") == NULL);
+    ASSERT_OK(casi_shared_config_load_remote(repo, &crypto, &loaded, &present));
+    ASSERT_TRUE(present);
+    ASSERT_TRUE(casi_shared_config_is_excluded(&loaded, "casi://private/client"));
+    ASSERT_RC(casi_shared_config_load_remote(repo, &wrong, &loaded, &present), CASI_EINVAL);
+
+    casi_buf_dispose(&header);
+    casi_shared_config_dispose(&cfg);
+    casi_shared_config_dispose(&loaded);
+    casi_crypto_dispose(&crypto);
+    casi_crypto_dispose(&wrong);
     casi_repo_free(repo);
     unsetenv("CASI_HOME");
     casi_paths_reset();
@@ -165,6 +208,7 @@ int main(void)
     RUN_TEST(test_rejects_bad_shared_values);
     RUN_TEST(test_parse_enforces_shared_config_invariants);
     RUN_TEST(test_identical_config_retries_an_unpublished_ref);
+    RUN_TEST(test_encrypted_shared_config_hides_payload);
 
     status = casi_test_report("shared_config");
     casi_shutdown();

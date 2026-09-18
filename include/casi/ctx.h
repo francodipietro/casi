@@ -3,6 +3,7 @@
 #define CASI_CTX_H
 
 #include "casi/config.h"
+#include "casi/crypto.h"
 #include "casi/provider.h"
 #include "casi/repo.h"
 #include "casi/roots.h"
@@ -13,6 +14,7 @@ typedef struct {
     casi_roots          *roots;
     casi_repo           *repo;
     const casi_provider *provider;
+    casi_crypto          crypto;   /* disabled unless crypto.mode says otherwise */
     char                *machine;   /* this machine's label; names its branch */
 } casi_ctx;
 

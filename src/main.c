@@ -6,7 +6,7 @@
 
 const casi_command casi_commands[] = {
     { "init",    "create the store and point it at a remote",
-      "casi init [--remote <url>] [--machine <name>]",
+      "casi init [--remote <url>] [--machine <name>] [--encrypt [--keyfile <path>]]",
       casi_cmd_init,    false },
     { "push",    "send this machine's sessions",
       "casi push [--dry-run]",
