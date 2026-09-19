@@ -1,7 +1,8 @@
 # casi remote-store format
 
-This document is the compatibility contract for a Git remote written by casi
-0.1.0. It describes the data below `refs/heads/casi/`, not the local,
+This document is the compatibility contract for a Git remote written by the
+casi 0.1 release series. It describes the data below `refs/heads/casi/`, not
+the local,
 disposable cache or the user's Claude Code directory. A conforming client may
 read an older supported format, but must reject a format it does not recognise
 and must not rewrite it as a different format.
