@@ -13,7 +13,7 @@ and ordinary pushes cannot create a GitHub Release.
    unattested release.
 3. Merge the release PR after its local independent review and required CI pass.
 4. From that merge commit, create and push an annotated tag named
-   `v<project-version>`, for example `v0.1.0`.
+   `v<project-version>`, for example `v0.1.1`.
 
 The release workflow rejects a tag whose version does not exactly match
 `CMakeLists.txt`. It builds from the tag, rather than from an uploaded
