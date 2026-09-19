@@ -123,6 +123,35 @@ jobs:
         run: |
           ./build/static/casi --version | grep -q 'ssh: exec'
 
+  # A Debian static build cannot verify the fully-static musl release archive:
+  # Alpine keeps the required .a files in distinct *-static packages. Keep
+  # this exact release matrix in PR CI so a tag is never its first execution.
+  linux-static:
+    name: Linux musl static artifact (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and inspect the static artifact
+        run: |
+          set -eu
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/src" -w /src alpine:3.22 sh -euxc '
+              apk add --no-cache build-base cmake ninja pkgconf git ca-certificates \
+                openssl-dev openssl-libs-static zlib-dev zlib-static curl-dev \
+                libsodium-dev libsodium-static linux-headers file
+              cmake --preset static -DCASI_FULLY_STATIC=ON
+              cmake --build --preset static
+              file build/static/casi | grep -q "statically linked"
+            '
+
   # The release workflow publishes this system-linked package. Exercise it in
   # ordinary CI too, so a CMake/install change cannot wait for a tag before it
   # discovers a broken Debian package or unresolved runtime dependency.
@@ -181,7 +210,7 @@ jobs:
   gate:
     name: CI
     if: always()
-    needs: [changes, quick, build, vendored, package, valgrind]
+    needs: [changes, quick, build, vendored, linux-static, package, valgrind]
     runs-on: ubuntu-latest
     steps:
       - name: Verify applicable jobs
@@ -192,6 +221,7 @@ jobs:
           QUICK_RESULT: ${{ needs.quick.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           VENDORED_RESULT: ${{ needs.vendored.result }}
+          LINUX_STATIC_RESULT: ${{ needs.linux-static.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
           VALGRIND_RESULT: ${{ needs.valgrind.result }}
         run: |
@@ -206,6 +236,7 @@ jobs:
           if [ "$FULL" = true ]; then
             [ "$BUILD_RESULT" = success ] || fail "full build matrix: $BUILD_RESULT"
             [ "$VENDORED_RESULT" = success ] || fail "vendored SSH build: $VENDORED_RESULT"
+            [ "$LINUX_STATIC_RESULT" = success ] || fail "Linux static artifact: $LINUX_STATIC_RESULT"
             [ "$PACKAGE_RESULT" = success ] || fail "Debian package: $PACKAGE_RESULT"
             [ "$VALGRIND_RESULT" = success ] || fail "valgrind: $VALGRIND_RESULT"
           elif [ "$QUICK" = true ]; then

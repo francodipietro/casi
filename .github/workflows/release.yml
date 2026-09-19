@@ -38,7 +38,8 @@ jobs:
           docker run --rm -e GITHUB_REF_NAME \
             -v "${GITHUB_WORKSPACE}:/src" -w /src alpine:3.22 sh -euxc '
               apk add --no-cache build-base cmake ninja pkgconf git ca-certificates \
-                openssl-dev zlib-dev curl-dev libsodium-dev linux-headers file
+                openssl-dev openssl-libs-static zlib-dev zlib-static curl-dev \
+                libsodium-dev libsodium-static linux-headers file
               cmake --preset static -DCASI_FULLY_STATIC=ON
               cmake --build --preset static
               file build/static/casi | grep -q "statically linked"
