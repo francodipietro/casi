@@ -123,6 +123,30 @@ jobs:
         run: |
           ./build/static/casi --version | grep -q 'ssh: exec'
 
+  # The release workflow publishes this system-linked package. Exercise it in
+  # ordinary CI too, so a CMake/install change cannot wait for a tag before it
+  # discovers a broken Debian package or unresolved runtime dependency.
+  package:
+    name: Debian package
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libgit2-dev libsodium-dev dpkg-dev
+      - run: cmake --preset release
+      - run: cmake --build --preset release
+      - name: Build and inspect the package
+        run: |
+          set -eu
+          cpack --config build/release/CPackConfig.cmake -G DEB
+          package=$(find . -maxdepth 1 -type f -name '*.deb' -print -quit)
+          test -n "$package"
+          dpkg-deb --info "$package"
+          dpkg-deb --contents "$package" | grep -q '/usr/bin/casi$'
+
   valgrind:
     name: valgrind
     needs: changes
@@ -157,7 +181,7 @@ jobs:
   gate:
     name: CI
     if: always()
-    needs: [changes, quick, build, vendored, valgrind]
+    needs: [changes, quick, build, vendored, package, valgrind]
     runs-on: ubuntu-latest
     steps:
       - name: Verify applicable jobs
@@ -168,6 +192,7 @@ jobs:
           QUICK_RESULT: ${{ needs.quick.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           VENDORED_RESULT: ${{ needs.vendored.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
           VALGRIND_RESULT: ${{ needs.valgrind.result }}
         run: |
           set -euo pipefail
@@ -181,6 +206,7 @@ jobs:
           if [ "$FULL" = true ]; then
             [ "$BUILD_RESULT" = success ] || fail "full build matrix: $BUILD_RESULT"
             [ "$VENDORED_RESULT" = success ] || fail "vendored SSH build: $VENDORED_RESULT"
+            [ "$PACKAGE_RESULT" = success ] || fail "Debian package: $PACKAGE_RESULT"
             [ "$VALGRIND_RESULT" = success ] || fail "valgrind: $VALGRIND_RESULT"
           elif [ "$QUICK" = true ]; then
             [ "$QUICK_RESULT" = success ] || fail "quick build: $QUICK_RESULT"

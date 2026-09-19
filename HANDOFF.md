@@ -40,9 +40,9 @@ current git state rather than as a replacement for the durable docs.
 ## 2. Current state — Phase 5 baseline
 
 - Repo: `github.com/francodipietro/casi` (private). Remote `origin` uses SSH.
-- `main`: `ad7ba54 feat(crypto): add opt-in encrypted stores`, the squash merge
-  of PR #9. It includes Phase 0, Phase 1 and its SSH/roundtrip follow-up,
-  scoped CI, and Phases 2 through 4.
+- `main`: `f2ade42 docs: close phase 4`, the squash merge of PR #10, following
+  the Phase 4 implementation merge in PR #9 (`ad7ba54`). It includes Phase 0,
+  Phase 1 and its SSH/roundtrip follow-up, scoped CI, and Phases 2 through 4.
 - Phase 2 made `refs/heads/casi/config` the authoritative shared
   configuration. It publishes named roots and `sync.exclude`, migrates legacy
   local exclusions on first publish, diagnoses shared root mappings with
@@ -302,12 +302,14 @@ matters more than the diff.
    synthetic 200 MiB transfer bound are automated, but the original plan's
    explicit `casi status` sub-second measurement on the real 390 MB dataset
    has not yet been repeated and captured as evidence.
-3. **libsodium is still external at runtime.** The static preset vendors
-   libgit2 but deliberately keeps libsodium as a system dependency; Phase 5
-   distribution work needs to package it with release artifacts.
+3. **The first public release is still unexecuted.** The Phase 5 machinery
+   builds self-contained prebuilt binaries and a Debian package, but it cannot
+   publish them until the repository is public and a version-matching tag is
+   pushed. Only then will immutable archive checksums exist for the owner to
+   pin the external Homebrew tap and AUR package; see `docs/RELEASING.md`.
 
-Deliberately later: distribution (Phase 5), deletions (Phase 6), Windows
-(Phase 7), and a second provider (Phase 8).
+Deliberately later: deletions (Phase 6), Windows (Phase 7), and a second
+provider (Phase 8).
 
 ## 7. Phase 4 closeout evidence
 

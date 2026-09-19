@@ -9,8 +9,8 @@ ctest --preset dev
 ```
 
 Presets: `dev` (sanitizers), `debug` (no sanitizers, for valgrind/lldb),
-`release`, `static` (vendored libgit2; libsodium remains a system dependency,
-for release binaries).
+`release`, `static` (vendored libgit2 plus static libsodium, used for release
+artifacts; Linux releases also set `CASI_FULLY_STATIC=ON`).
 
 ## House style
 

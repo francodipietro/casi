@@ -49,6 +49,7 @@ set(CASI_INTEGRATION_TESTS
     doctor
     auxiliary_files
     nested_roots
+    format
     encryption
     large_session
     gc

@@ -16,6 +16,8 @@ cmake_install.cmake
 CTestTestfile.cmake
 Testing/
 _deps/
+_CPack_Packages/
+/casi-*.tar.gz
 
 # Editors
 .vscode/

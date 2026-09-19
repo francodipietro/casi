@@ -35,7 +35,7 @@
     },
     {
       "name": "static",
-      "displayName": "Static release binary (vendored libgit2)",
+      "displayName": "Release binary (vendored libgit2 + static libsodium)",
       "binaryDir": "${sourceDir}/build/static",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",

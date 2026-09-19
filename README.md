@@ -24,7 +24,14 @@ casi status                # what is out of date, and where
 
 Under the hood it is a git repository, so you get content integrity,
 deduplication, compression and incremental transfer for free. You never see any
-of that.
+of that. The versioned remote-store contract is documented in
+[docs/FORMAT.md](docs/FORMAT.md).
+
+## Releases
+
+Release assets are produced from version tags, with SHA-256 checksums and
+GitHub build provenance. The artifact layout, verification command, and the
+owner-controlled publication procedure are in [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Why not just rsync / Dropbox / a git repo of ~/.claude
 
@@ -76,11 +83,12 @@ For development, `--preset dev` adds ASan/UBSan and `-Werror`:
 cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 ```
 
-`--preset static` vendors libgit2 and builds it with the OpenSSH `exec`
-transport. libsodium remains a system dependency until Phase 5 packages it
-with the release artifact. Reach for it if your distro's libgit2 links libssh2
-and you need `~/.ssh/config` host aliases to resolve — `casi --version` tells
-you which backend you have.
+`--preset static` vendors libgit2, selects the static libsodium archive, and
+builds libgit2 with the OpenSSH `exec` transport. The release workflow adds
+full static linking for Linux and produces macOS binaries with no Homebrew
+dependencies. Reach for this preset if your distro's libgit2 links libssh2 and
+you need `~/.ssh/config` host aliases to resolve — `casi --version` tells you
+which backend you have.
 
 That preset produces an artifact to copy, not one to `cmake --install`: libgit2's
 own install rules come along with it and would drop its headers and static
