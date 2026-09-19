@@ -40,9 +40,9 @@ current git state rather than as a replacement for the durable docs.
 ## 2. Current state — Phase 5 baseline
 
 - Repo: `github.com/francodipietro/casi` (private). Remote `origin` uses SSH.
-- `main`: `f2ade42 docs: close phase 4`, the squash merge of PR #10, following
-  the Phase 4 implementation merge in PR #9 (`ad7ba54`). It includes Phase 0,
-  Phase 1 and its SSH/roundtrip follow-up, scoped CI, and Phases 2 through 4.
+- `main` includes Phase 0, Phase 1 and its SSH/roundtrip follow-up, scoped CI,
+  Phases 2 through 4, the Phase 5 distribution merge (PR #11), and the first
+  release-workflow repair (PR #12).
 - Phase 2 made `refs/heads/casi/config` the authoritative shared
   configuration. It publishes named roots and `sync.exclude`, migrates legacy
   local exclusions on first publish, diagnoses shared root mappings with
@@ -307,6 +307,13 @@ matters more than the diff.
    publish them until the repository is public and a version-matching tag is
    pushed. Only then will immutable archive checksums exist for the owner to
    pin the external Homebrew tap and AUR package; see `docs/RELEASING.md`.
+   The first two `v0.1.0` attempts published neither a GitHub Release nor
+   attestations: first Alpine could not run `apk` as the runner UID, then
+   libgit2 could not find its static OpenSSL backend. The release job now
+   installs Alpine's separate `openssl-libs-static`, `zlib-static`, and
+   `libsodium-static` packages, and ordinary CI exercises that same musl build
+   before a tag can be the first execution. The aborted tag may be recreated
+   only while no release asset, published checksum, or attestation exists.
 
 Deliberately later: deletions (Phase 6), Windows (Phase 7), and a second
 provider (Phase 8).
