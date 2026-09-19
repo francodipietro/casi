@@ -1354,6 +1354,26 @@ done:
     return rc;
 }
 
+static int validate_tree_format(casi_repo *repo, const git_oid *tree)
+{
+    casi_buf path = CASI_BUF_INIT, meta = CASI_BUF_INIT;
+    int rc;
+
+    if ((rc = path_append_component(repo, &path, "casi.json")) != CASI_OK ||
+        (rc = casi_repo_tree_entry_blob(repo, tree, casi_buf_cstr(&path), &meta)) != CASI_OK)
+        goto done;
+    if (casi_json_find_uint(meta.ptr, meta.len, "format") != CASI_FORMAT_VERSION) {
+        rc = casi_error_set(CASI_EINVAL, "unsupported or missing machine tree format");
+        goto done;
+    }
+    rc = CASI_OK;
+
+done:
+    casi_buf_dispose(&path);
+    casi_buf_dispose(&meta);
+    return rc;
+}
+
 int casi_store_read_tree(casi_repo *repo, const git_oid *tree,
                          const char *provider_name, casi_entry_list *out,
                          casi_asset_list *assets_out)
@@ -1363,6 +1383,9 @@ int casi_store_read_tree(casi_repo *repo, const git_oid *tree,
                 memory_project_ids = CASI_STRVEC_INIT;
     size_t i, j;
     int rc;
+
+    if ((rc = validate_tree_format(repo, tree)) != CASI_OK)
+        goto done;
 
     if (casi_repo_crypto_enabled(repo))
         return read_encrypted_tree(repo, tree, provider_name, out, assets_out);

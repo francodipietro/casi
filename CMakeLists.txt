@@ -20,6 +20,18 @@ option(CASI_WERROR          "Treat compiler warnings as errors"        OFF)
 option(CASI_SANITIZE        "Build with ASan + UBSan"                  OFF)
 option(CASI_VENDOR_LIBGIT2  "Build libgit2 from source and link it in" OFF)
 option(CASI_BUILD_TESTS     "Build the test suite"                     ON)
+option(CASI_FULLY_STATIC    "Link a Linux artifact without shared libraries" OFF)
+
+if(CASI_FULLY_STATIC)
+    if(APPLE)
+        message(FATAL_ERROR "CASI_FULLY_STATIC is only supported for Linux release artifacts")
+    endif()
+    # This is intentionally a separate switch from CASI_VENDOR_LIBGIT2:
+    # macOS release binaries vendor third-party libraries but retain system
+    # frameworks, whereas Linux prebuilt archives are completely static musl.
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    string(APPEND CMAKE_EXE_LINKER_FLAGS " -static")
+endif()
 
 # ---------------------------------------------------------------- libgit2 ---
 # Preferred path: system libgit2 via pkg-config (brew / apt / pacman).
@@ -90,7 +102,38 @@ endif()
 # Phase 4 encrypts remote content with the portable XChaCha20-Poly1305 AEAD
 # implementation from libsodium.  1.0.12 introduced that construction.
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.12)
+if(CASI_VENDOR_LIBGIT2)
+    # `--preset static` is the prebuilt-release path.  Ask pkg-config for the
+    # static archive here too; otherwise Homebrew (and many Linux distros)
+    # silently selects libsodium's shared library and turns a supposedly
+    # self-contained artifact into one with a local Cellar path.
+    set(CASI_PKG_CONFIG_ARGN_SAVE "${PKG_CONFIG_ARGN}")
+    list(APPEND PKG_CONFIG_ARGN --static)
+    pkg_check_modules(SODIUM REQUIRED libsodium>=1.0.12)
+    set(PKG_CONFIG_ARGN "${CASI_PKG_CONFIG_ARGN_SAVE}")
+
+    # FindPkgConfig resolves `-lsodium` to the shared library on platforms
+    # that provide both variants. Select the archive explicitly, retaining
+    # pkg-config's static transitive flags (for example `-pthread`).
+    find_file(CASI_SODIUM_STATIC_LIBRARY NAMES libsodium.a
+              PATHS ${SODIUM_STATIC_LIBRARY_DIRS} NO_DEFAULT_PATH)
+    if(NOT CASI_SODIUM_STATIC_LIBRARY)
+        message(FATAL_ERROR
+            "CASI_VENDOR_LIBGIT2=ON requires a static libsodium archive; "
+            "install the libsodium development/static package")
+    endif()
+    set(CASI_SODIUM_STATIC_TRANSITIVE ${SODIUM_STATIC_LIBRARIES})
+    list(REMOVE_ITEM CASI_SODIUM_STATIC_TRANSITIVE sodium)
+    add_library(casi::sodium INTERFACE IMPORTED)
+    set_target_properties(casi::sodium PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_STATIC_INCLUDE_DIRS}"
+        INTERFACE_LINK_LIBRARIES
+            "${CASI_SODIUM_STATIC_LIBRARY};${CASI_SODIUM_STATIC_TRANSITIVE}"
+        INTERFACE_LINK_OPTIONS "${SODIUM_STATIC_LDFLAGS_OTHER}")
+else()
+    pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.12)
+    add_library(casi::sodium ALIAS PkgConfig::SODIUM)
+endif()
 
 # ------------------------------------------------------------- core library --
 # Everything except main() lives here so the tests can link it directly.
@@ -123,7 +166,7 @@ target_include_directories(casi_core
             ${CMAKE_CURRENT_BINARY_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(casi_core PUBLIC casi::libgit2 PkgConfig::SODIUM)
+target_link_libraries(casi_core PUBLIC casi::libgit2 casi::sodium)
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.h.in
@@ -188,3 +231,26 @@ endif()
 # ----------------------------------------------------------------- install ---
 include(GNUInstallDirs)
 install(TARGETS casi RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# CPack covers the system-linked packages.  Prebuilt artifacts use the
+# `static` preset instead: it vendors libgit2, while the release workflow also
+# bundles the libsodium dependency rather than asking an end user to install
+# build tooling or development headers.
+set(CPACK_PACKAGE_NAME "casi")
+set(CPACK_PACKAGE_VENDOR "francodipietro")
+set(CPACK_PACKAGE_CONTACT "https://github.com/francodipietro/casi/issues")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Coding Assistant Session Interchange")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/francodipietro/casi")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_FILE_NAME
+    "${CPACK_PACKAGE_NAME}-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_GENERATOR "TGZ")
+
+if(UNIX AND NOT APPLE)
+    list(APPEND CPACK_GENERATOR DEB)
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+endif()
+
+include(CPack)

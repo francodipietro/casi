@@ -1,0 +1,166 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+# Releases are created only from a tag. Pull-request CI never receives these
+# permissions, which keeps untrusted PR code away from the release token.
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  linux:
+    name: Linux musl (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the release tag
+        run: |
+          set -eu
+          version=$(sed -n 's/^[[:space:]]*VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt | head -1)
+          test "v${version}" = "${GITHUB_REF_NAME}"
+      - name: Build a static musl artifact
+        run: |
+          set -eu
+          docker run --rm --user "$(id -u):$(id -g)" -e GITHUB_REF_NAME \
+            -v "${GITHUB_WORKSPACE}:/src" -w /src alpine:3.22 sh -euxc '
+              apk add --no-cache build-base cmake ninja pkgconf git ca-certificates \
+                openssl-dev zlib-dev curl-dev libsodium-dev linux-headers file
+              cmake --preset static -DCASI_FULLY_STATIC=ON
+              cmake --build --preset static
+              file build/static/casi | grep -q "statically linked"
+              mkdir -p dist
+              cp build/static/casi dist/casi
+              tar -czf "dist/casi_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}.tar.gz" \
+                -C dist casi
+            '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-15-intel, arch: x86_64 }
+          - { runner: macos-14, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the release tag
+        run: |
+          set -eu
+          version=$(sed -n 's/^[[:space:]]*VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt | head -1)
+          test "v${version}" = "${GITHUB_REF_NAME}"
+      - run: brew install cmake pkg-config libsodium
+      - run: cmake --preset static
+      - run: cmake --build --preset static
+      - name: Verify and stage the architecture slice
+        run: |
+          set -eu
+          ! otool -L build/static/casi | grep -Eq '/(opt/homebrew|usr/local)/'
+          mkdir dist
+          cp build/static/casi "dist/casi-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-slice-${{ matrix.arch }}
+          path: dist/casi-${{ matrix.arch }}
+          if-no-files-found: error
+
+  macos-universal:
+    name: macOS universal artifact
+    needs: macos
+    runs-on: macos-14
+    steps:
+      - name: Require a public repository
+        if: github.event.repository.private
+        run: |
+          echo "::error::Release attestations require this repository to be public"
+          exit 1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-slice-*
+          path: dist
+          merge-multiple: true
+      - name: Combine, ad-hoc sign, and archive
+        run: |
+          set -eu
+          lipo -create dist/casi-x86_64 dist/casi-arm64 -output dist/casi
+          test "$(lipo -archs dist/casi)" = "x86_64 arm64" -o \
+               "$(lipo -archs dist/casi)" = "arm64 x86_64"
+          codesign --force --sign - dist/casi
+          codesign --verify --verbose dist/casi
+          tar -czf "dist/casi_${GITHUB_REF_NAME#v}_darwin_universal.tar.gz" -C dist casi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-universal
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  debian:
+    name: Debian package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the release tag
+        run: |
+          set -eu
+          version=$(sed -n 's/^[[:space:]]*VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt | head -1)
+          test "v${version}" = "${GITHUB_REF_NAME}"
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libgit2-dev libsodium-dev dpkg-dev
+      - run: cmake --preset release
+      - run: cmake --build --preset release
+      - name: Build the Debian package
+        run: |
+          set -eu
+          cpack --config build/release/CPackConfig.cmake -G DEB
+          mkdir dist
+          find . -maxdepth 1 -type f -name '*.deb' -exec mv {} dist/ \;
+          test -n "$(find dist -type f -name '*.deb' -print -quit)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-debian
+          path: dist/*.deb
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: [linux, macos-universal, debian]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          set -eu
+          cd dist
+          sha256sum * > checksums.txt
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/checksums.txt
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "casi ${GITHUB_REF_NAME}" --generate-notes

@@ -39,6 +39,11 @@ Known supersessions (see HANDOFF.md for detail):
   recovery of the transcript, sidecar, and memory after copying the key. See
   `docs/DESIGN.md` and HANDOFF.md for the security boundaries; an OS-keychain
   backend remains a future UX enhancement.
+- §9 / Phase 5 now has a tag-triggered release workflow, a CPack Debian
+  package path, `docs/FORMAT.md`, and `docs/RELEASING.md`. The source PR does
+  not publish a release: the repository must first be public, then a matching
+  version tag triggers artifacts, checksums, and attestation. Those checksums
+  let the owner pin the external Homebrew tap and AUR package; see HANDOFF.md.
 
 Everything else below reflects what was actually built.
 
@@ -655,6 +660,12 @@ roundtrip es byte-exacto.
 
 **Fase 5 — Distribución y apertura.** Releases prebuilt desde CI, tap de Homebrew, PKGBUILD,
 `.deb`, `docs/FORMAT.md` (el formato del árbol como contrato estable), repo público.
+
+> La implementación de distribución queda preparada por la PR de la fase: el
+> workflow de release se activa únicamente con un tag de versión y exige que el
+> repositorio sea público. La primera publicación, y el pin de checksums en el
+> tap de Homebrew y AUR externos, siguen siendo operaciones del owner después
+> del merge. El procedimiento verificable está en `docs/RELEASING.md`.
 
 **Fase 6 — Borrados y `casi forget`.** Tombstones con 3-way contra `refs/casi/base`, `--prune`
 explícito, `pull` sigue sin borrar nunca por defecto.
