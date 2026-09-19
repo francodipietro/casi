@@ -19,6 +19,17 @@ The release workflow rejects a tag whose version does not exactly match
 `CMakeLists.txt`. It builds from the tag, rather than from an uploaded
 developer artifact.
 
+### Recovering before publication
+
+If a tag-triggered workflow fails **before** it creates a GitHub Release,
+uploads an asset to that release, or creates attestations, fix the workflow in
+a reviewed merge, delete that failed remote tag, and recreate the same
+annotated tag at the corrected merge commit. This is the limited recovery path
+for an aborted first publication. Intermediate Actions artifacts alone do not
+make a release public. Do not move, delete, or reuse a tag once a release,
+published checksum, or attestation exists: those names are then part of the
+public supply chain and a subsequent fix needs a new version.
+
 ## Produced assets
 
 The workflow publishes these assets and a `checksums.txt` file in the GitHub
