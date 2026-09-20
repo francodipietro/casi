@@ -747,16 +747,43 @@ static int fetch_progress_cb(const git_indexer_progress *stats, void *payload)
     return 0;
 }
 
-static int push_progress_cb(unsigned int current, unsigned int total,
-                            size_t bytes, void *payload)
+/* The remote (GitHub) streams its own progress over the sideband -- "Receiving
+ * objects: 12%", "Resolving deltas", etc. This is the only honest progress
+ * during an upload over SSH: libgit2's push_transfer_progress byte counter does
+ * not advance for the pack stream. Show the server's words verbatim. */
+static int sideband_progress_cb(const char *str, int len, void *payload)
+{
+    (void)payload;
+
+    if (len > 0)
+        casi_progress("%.*s", len, str);
+    return 0;
+}
+
+static int pack_progress_cb(int stage, uint32_t current, uint32_t total, void *payload)
 {
     (void)payload;
 
     if (total > 0)
-        casi_progress("uploading objects: %u/%u (%zu KiB)", current, total,
-                      bytes / 1024);
+        casi_progress("packing objects (%s): %u/%u",
+                      stage == 0 ? "counting" : "compressing", current, total);
     else
-        casi_progress("uploading objects: %u (%zu KiB)", current, bytes / 1024);
+        casi_progress("packing objects (%s): %u",
+                      stage == 0 ? "counting" : "compressing", current);
+    return 0;
+}
+
+static int push_progress_cb(unsigned int current, unsigned int total,
+                            size_t bytes, void *payload)
+{
+    (void)payload;
+    (void)bytes;
+
+    if (total > 0)
+        casi_progress("uploading objects: %u/%u (%u%%)", current, total,
+                      (unsigned)(current * 100 / total));
+    else
+        casi_progress("uploading objects: %u", current);
     return 0;
 }
 
@@ -765,6 +792,8 @@ static void init_callbacks(git_remote_callbacks *cb, struct ssh_auth *auth)
     git_remote_init_callbacks(cb, GIT_REMOTE_CALLBACKS_VERSION);
     cb->credentials = credential_cb;
     cb->certificate_check = certificate_cb;
+    cb->sideband_progress = sideband_progress_cb;
+    cb->pack_progress = pack_progress_cb;
     cb->transfer_progress = fetch_progress_cb;
     cb->push_transfer_progress = push_progress_cb;
     cb->payload = auth;
