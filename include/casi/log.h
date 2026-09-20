@@ -34,6 +34,12 @@ void casi_debug(const char *fmt, ...) CASI_PRINTF_FORMAT(1, 2);
 void casi_warn(const char *fmt, ...) CASI_PRINTF_FORMAT(1, 2);
 void casi_err(const char *fmt, ...) CASI_PRINTF_FORMAT(1, 2);
 
+/* A self-overwriting progress line on stderr, shown only when stderr is a TTY
+ * and not under --quiet. Piped or redirected, it emits nothing so logs stay
+ * clean. Call casi_progress_done() before printing a final result line. */
+void casi_progress(const char *fmt, ...) CASI_PRINTF_FORMAT(1, 2);
+void casi_progress_done(void);
+
 #undef CASI_PRINTF_FORMAT
 
 #endif /* CASI_LOG_H */

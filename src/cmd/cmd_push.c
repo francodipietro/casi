@@ -57,6 +57,7 @@ int casi_cmd_push(int argc, char **argv)
                  local.len, local_assets.len, excluded);
 
     if (dry_run) {
+        casi_progress_done();
         if (unchanged)
             casi_info("nothing to push");
         else
@@ -79,6 +80,7 @@ int casi_cmd_push(int argc, char **argv)
     if ((rc = casi_repo_push(ctx.repo, casi_buf_cstr(&refname))) != CASI_OK)
         goto done;
 
+    casi_progress_done();
     if (unchanged)
         casi_info("already up to date");
     else

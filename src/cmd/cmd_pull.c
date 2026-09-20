@@ -285,6 +285,7 @@ int casi_cmd_pull(int argc, char **argv)
             continue;
         }
 
+        casi_progress("materializing session %zu/%zu", i + 1, remote.len);
         casi_buf_clear(&unmapped);
         rc = casi_store_materialize(ctx.repo, ctx.roots, ctx.provider, r, &unmapped);
         if (rc == CASI_EUNMAPPED) {
@@ -348,6 +349,7 @@ int casi_cmd_pull(int argc, char **argv)
         assets_pulled++;
     }
 
+    casi_progress_done();
     casi_info("%s %zu session(s)", dry_run ? "would update" : "updated", pulled);
     if (assets_pulled > 0)
         casi_info("%s %zu auxiliary file(s)", dry_run ? "would update" : "updated",

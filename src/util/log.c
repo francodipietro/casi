@@ -9,6 +9,7 @@
 
 static casi_log_level g_level = CASI_LOG_NORMAL;
 static bool           g_color;
+static bool           g_progress_active;
 
 void casi_log_set_level(casi_log_level level) { g_level = level; }
 casi_log_level casi_log_get_level(void)       { return g_level; }
@@ -63,4 +64,28 @@ void casi_err(const char *fmt, ...)
     /* Errors survive --quiet: a silent failure is worse than noise. */
     LOG_BODY(stderr, CASI_LOG_QUIET,
              g_color ? "\033[31merror:\033[0m " : "error: ");
+}
+
+void casi_progress(const char *fmt, ...)
+{
+    va_list ap;
+
+    if (g_level < CASI_LOG_NORMAL || !casi_fs_stderr_is_tty())
+        return;
+    va_start(ap, fmt);
+    fputs("\r", stderr);
+    vfprintf(stderr, fmt, ap);
+    fputs("\033[K", stderr);   /* clear to end of line */
+    fflush(stderr);
+    va_end(ap);
+    g_progress_active = true;
+}
+
+void casi_progress_done(void)
+{
+    if (!g_progress_active)
+        return;
+    fputs("\n", stderr);
+    fflush(stderr);
+    g_progress_active = false;
 }

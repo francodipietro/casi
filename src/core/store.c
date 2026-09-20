@@ -347,6 +347,8 @@ struct chunk_writer {
     size_t     written;
     size_t     offset;
     size_t     last_start;
+    size_t     total;
+    const char *label;
 };
 
 static int write_one_chunk(const void *data, size_t len, size_t index, void *payload)
@@ -359,6 +361,8 @@ static int write_one_chunk(const void *data, size_t len, size_t index, void *pay
     w->last_start = w->offset;
     w->offset += len;
     w->written = index + 1;
+    if (w->total > 0)
+        casi_progress("scanning %s: %zu/%zu bytes", w->label, w->offset, w->total);
     return casi_repo_write_blob(w->repo, data, len, &w->oids[index]);
 }
 
@@ -412,12 +416,14 @@ static int raw_offset_for_normalized_boundary(const casi_buf *raw,
     return casi_error_set(CASI_ERROR, "cannot map normalized chunk boundary to source");
 }
 
-static int write_chunks(casi_repo *repo, const casi_buf *normalized,
+static int write_chunks(casi_repo *repo, const char *label, const casi_buf *normalized,
                         struct chunk_writer *writer)
 {
     size_t count = casi_chunk_count(normalized->ptr, normalized->len, CASI_CHUNK_TARGET);
 
     memset(writer, 0, sizeof(*writer));
+    writer->label = label;
+    writer->total = normalized->len;
     if (count == 0)
         return CASI_OK;
     writer->oids = calloc(count, sizeof(*writer->oids));
@@ -575,7 +581,7 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
                 goto done;
         }
     }
-    if ((rc = write_chunks(repo, &normalized, &writer)) != CASI_OK)
+    if ((rc = write_chunks(repo, session->project_path, &normalized, &writer)) != CASI_OK)
         goto done;
 
     if (resume) {
@@ -707,6 +713,8 @@ int casi_store_scan_local(casi_repo *repo, casi_roots *roots,
             continue;
         }
 
+        casi_progress("scanning session %zu/%zu: %s", i + 1, sessions.len,
+                      sessions.items[i].project_path);
         if ((rc = scan_one_session(repo, roots, index, provider->name,
                                    &sessions.items[i], out)) != CASI_OK)
             goto done;

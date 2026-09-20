@@ -471,6 +471,11 @@ bool casi_fs_stdout_is_tty(void)
     return isatty(STDOUT_FILENO) ? true : false;
 }
 
+bool casi_fs_stderr_is_tty(void)
+{
+    return isatty(STDERR_FILENO) ? true : false;
+}
+
 int casi_fs_hostname(casi_buf *out)
 {
     char host[256];

@@ -2,6 +2,7 @@
 #include "casi/repo.h"
 #include "casi/casi.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -732,11 +733,40 @@ static int certificate_cb(git_cert *cert, int valid, const char *host, void *pay
     return valid ? 0 : GIT_ECERTIFICATE;
 }
 
+static int fetch_progress_cb(const git_indexer_progress *stats, void *payload)
+{
+    (void)payload;
+
+    if (stats->total_objects > 0)
+        casi_progress("fetching objects: %u/%u (%zu KiB)",
+                      stats->received_objects, stats->total_objects,
+                      stats->received_bytes / 1024);
+    else
+        casi_progress("fetching objects: %u (%zu KiB)",
+                      stats->received_objects, stats->received_bytes / 1024);
+    return 0;
+}
+
+static int push_progress_cb(unsigned int current, unsigned int total,
+                            size_t bytes, void *payload)
+{
+    (void)payload;
+
+    if (total > 0)
+        casi_progress("uploading objects: %u/%u (%zu KiB)", current, total,
+                      bytes / 1024);
+    else
+        casi_progress("uploading objects: %u (%zu KiB)", current, bytes / 1024);
+    return 0;
+}
+
 static void init_callbacks(git_remote_callbacks *cb, struct ssh_auth *auth)
 {
     git_remote_init_callbacks(cb, GIT_REMOTE_CALLBACKS_VERSION);
     cb->credentials = credential_cb;
     cb->certificate_check = certificate_cb;
+    cb->transfer_progress = fetch_progress_cb;
+    cb->push_transfer_progress = push_progress_cb;
     cb->payload = auth;
 }
 
@@ -772,6 +802,7 @@ int casi_repo_fetch(casi_repo *repo)
 
     git_remote_free(remote);
     ssh_auth_dispose(&auth);
+    casi_progress_done();
     return rc;
 }
 
@@ -813,6 +844,7 @@ out:
     casi_buf_dispose(&spec);
     git_remote_free(remote);
     ssh_auth_dispose(&auth);
+    casi_progress_done();
     return rc;
 }
 
