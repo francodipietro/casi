@@ -33,9 +33,12 @@ typedef struct {
     char    *session_id;
     char    *project_path;   /* canonical */
     char    *project_id;
+    char    *origin_machine; /* machine whose branch carried this copy; NULL locally */
     git_oid *chunks;
     size_t   chunk_count;
     uint64_t bytes;          /* normalised size, not the on-disk size */
+    uint64_t updated_at;     /* epoch seconds of the source mtime; 0 unknown.
+                                Display-only: never used to decide sync. */
 } casi_entry;
 
 typedef struct {
@@ -93,9 +96,10 @@ int casi_store_read_tree(casi_repo *repo, const git_oid *tree,
                          const char *provider_name, casi_entry_list *out,
                          casi_asset_list *assets_out);
 
-/* Builds the tree for a set of entries. */
+/* Builds the tree for a set of entries. `machine` names the branch owner and
+ * is recorded as each session's origin machine. */
 int casi_store_write_tree(casi_repo *repo, const char *provider_name,
-                          const casi_entry_list *entries,
+                          const char *machine, const casi_entry_list *entries,
                           const casi_asset_list *assets, git_oid *tree_out);
 
 /*

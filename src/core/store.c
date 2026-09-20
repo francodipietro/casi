@@ -19,6 +19,7 @@ static void entry_dispose(casi_entry *entry)
     free(entry->session_id);
     free(entry->project_path);
     free(entry->project_id);
+    free(entry->origin_machine);
     free(entry->chunks);
     memset(entry, 0, sizeof(*entry));
 }
@@ -430,7 +431,7 @@ static int write_chunks(casi_repo *repo, const casi_buf *normalized,
 
 static int entry_take_chunks(const casi_session *session, git_oid **chunks,
                              size_t chunk_count, uint64_t bytes,
-                             casi_entry_list *out)
+                             uint64_t updated_at, casi_entry_list *out)
 {
     casi_entry entry;
     int rc;
@@ -442,6 +443,7 @@ static int entry_take_chunks(const casi_session *session, git_oid **chunks,
     entry.chunks = *chunks;
     entry.chunk_count = chunk_count;
     entry.bytes = bytes;
+    entry.updated_at = updated_at;
     *chunks = NULL;
     if (entry.session_id == NULL || entry.project_path == NULL || entry.project_id == NULL) {
         entry_dispose(&entry);
@@ -521,7 +523,7 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
     casi_stat before, after;
     git_oid *chunks = NULL;
     size_t chunk_count, raw_tail, tail_normalized;
-    uint64_t bytes;
+    uint64_t bytes, updated_at;
     bool resume = false;
     int rc;
 
@@ -529,6 +531,7 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
 
     if ((rc = casi_fs_stat(session->local_path, &before)) != CASI_OK)
         goto done;
+    updated_at = before.mtime_sec > 0 ? (uint64_t)before.mtime_sec : 0;
     cached = casi_index_find(index, provider_name, session->local_path);
     if (casi_index_entry_matches(cached, &before) && cache_entry_is_valid(repo, cached)) {
         if (cached->chunk_count > 0) {
@@ -540,7 +543,7 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
             memcpy(chunks, cached->chunks, cached->chunk_count * sizeof(*chunks));
         }
         rc = entry_take_chunks(session, &chunks, cached->chunk_count,
-                               cached->normalized_bytes, out);
+                               cached->normalized_bytes, updated_at, out);
         goto done;
     }
 
@@ -614,7 +617,8 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
         bytes = normalized.len;
     }
 
-    if ((rc = entry_take_chunks(session, &chunks, chunk_count, bytes, out)) != CASI_OK)
+    if ((rc = entry_take_chunks(session, &chunks, chunk_count, bytes,
+                                updated_at, out)) != CASI_OK)
         goto done;
     if ((rc = casi_fs_stat(session->local_path, &after)) != CASI_OK)
         goto done;
@@ -728,18 +732,22 @@ done:
 }
 
 int casi_store_write_tree(casi_repo *repo, const char *provider_name,
-                          const casi_entry_list *entries,
+                          const char *machine, const casi_entry_list *entries,
                           const casi_asset_list *assets, git_oid *tree_out)
 {
     casi_tree *tree = NULL;
     casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT, meta = CASI_BUF_INIT;
     casi_buf session_json = CASI_BUF_INIT, project_json = CASI_BUF_INIT,
-             project_id_json = CASI_BUF_INIT, chunk_oids = CASI_BUF_INIT;
+             project_id_json = CASI_BUF_INIT, chunk_oids = CASI_BUF_INIT,
+             machine_json = CASI_BUF_INIT;
     size_t i, c;
     int rc;
 
     if ((rc = casi_tree_new(repo, &tree)) != CASI_OK)
         return rc;
+
+    if ((rc = casi_json_escape_string(machine, &machine_json)) != CASI_OK)
+        goto done;
 
     casi_buf_clear(&meta);
     if ((rc = casi_buf_printf(&meta, "{\"format\":%d}\n", CASI_FORMAT_VERSION)) != CASI_OK)
@@ -771,10 +779,13 @@ int casi_store_write_tree(casi_repo *repo, const char *provider_name,
                              "\"projectPath\":\"%s\","
                              "\"chunks\":%zu,"
                              "\"chunkOids\":%s,"
-                             "\"bytes\":%" PRIu64 "}\n",
+                             "\"bytes\":%" PRIu64 ","
+                             "\"originMachine\":\"%s\","
+                             "\"updatedAt\":%" PRIu64 "}\n",
                              casi_buf_cstr(&session_json), casi_buf_cstr(&project_id_json),
                              casi_buf_cstr(&project_json),
-                             e->chunk_count, casi_buf_cstr(&chunk_oids), e->bytes);
+                             e->chunk_count, casi_buf_cstr(&chunk_oids), e->bytes,
+                             casi_buf_cstr(&machine_json), e->updated_at);
         if (rc != CASI_OK)
             goto done;
 
@@ -832,6 +843,7 @@ done:
     casi_buf_dispose(&project_json);
     casi_buf_dispose(&project_id_json);
     casi_buf_dispose(&chunk_oids);
+    casi_buf_dispose(&machine_json);
     return rc;
 }
 
@@ -942,7 +954,8 @@ static int read_encrypted_session_entry(casi_repo *repo, const git_oid *tree,
 {
     casi_buf dir = CASI_BUF_INIT, path = CASI_BUF_INIT, meta = CASI_BUF_INIT;
     casi_buf project_id = CASI_BUF_INIT, session_id = CASI_BUF_INIT,
-             project_path = CASI_BUF_INIT, number = CASI_BUF_INIT;
+             project_path = CASI_BUF_INIT, number = CASI_BUF_INIT,
+             origin = CASI_BUF_INIT;
     casi_strvec asset_names = CASI_STRVEC_INIT, chunk_oids = CASI_STRVEC_INIT;
     casi_entry entry;
     uint64_t chunk_count;
@@ -974,10 +987,19 @@ static int read_encrypted_session_entry(casi_repo *repo, const git_oid *tree,
     entry.project_id = casi_strdup(casi_buf_cstr(&project_id));
     entry.project_path = casi_strdup(casi_buf_cstr(&project_path));
     entry.bytes = casi_json_find_uint(meta.ptr, meta.len, "bytes");
+    entry.updated_at = casi_json_find_uint(meta.ptr, meta.len, "updatedAt");
     entry.chunk_count = (size_t)chunk_count;
     if (entry.session_id == NULL || entry.project_id == NULL || entry.project_path == NULL) {
         rc = casi_error_set(CASI_ENOMEM, "out of memory reading encrypted session metadata");
         goto done;
+    }
+    if (casi_json_find_string(meta.ptr, meta.len, "originMachine", &origin)) {
+        entry.origin_machine = casi_strdup(casi_buf_cstr(&origin));
+        if (entry.origin_machine == NULL) {
+            rc = casi_error_set(CASI_ENOMEM,
+                                "out of memory reading encrypted origin machine");
+            goto done;
+        }
     }
     if (entry.chunk_count > 0) {
         entry.chunks = calloc(entry.chunk_count, sizeof(*entry.chunks));
@@ -1047,6 +1069,7 @@ done:
     casi_buf_dispose(&session_id);
     casi_buf_dispose(&project_path);
     casi_buf_dispose(&number);
+    casi_buf_dispose(&origin);
     return rc;
 }
 
@@ -1197,10 +1220,20 @@ static int read_session_entry(casi_repo *repo, const git_oid *tree,
     entry.project_id   = casi_strdup(project_id);
     entry.project_path = casi_strdup(casi_buf_cstr(&value));
     entry.bytes        = casi_json_find_uint(casi_buf_cstr(&meta), meta.len, "bytes");
+    entry.updated_at   = casi_json_find_uint(casi_buf_cstr(&meta), meta.len, "updatedAt");
     if (entry.session_id == NULL || entry.project_id == NULL ||
         entry.project_path == NULL) {
         rc = CASI_ENOMEM;
         goto done;
+    }
+    /* originMachine/updatedAt are additive: stores written before they existed
+     * simply lack them, which is not malformed metadata. */
+    if (casi_json_find_string(casi_buf_cstr(&meta), meta.len, "originMachine", &value)) {
+        entry.origin_machine = casi_strdup(casi_buf_cstr(&value));
+        if (entry.origin_machine == NULL) {
+            rc = CASI_ENOMEM;
+            goto done;
+        }
     }
 
     casi_buf_clear(&path);

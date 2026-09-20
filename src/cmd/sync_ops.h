@@ -39,4 +39,31 @@ int casi_ops_summarise(casi_repo *repo, casi_entry_list *local,
                        casi_entry_list *remote, casi_asset_list *local_assets,
                        casi_asset_list *remote_assets, casi_sync_summary *out);
 
+/* One divergent session: the two sides and how far they still agree. */
+typedef struct {
+    casi_entry *local;
+    casi_entry *remote;
+    size_t      common_chunks;
+} casi_conflict;
+
+typedef struct {
+    casi_conflict *items;
+    size_t         len;
+    size_t         cap;
+} casi_conflict_list;
+
+/* Every session that exists on both sides and genuinely diverged, with the
+ * number of leading chunks the two copies still share. Pointers into the two
+ * entry lists; the caller must keep them alive while the list is in use. */
+int  casi_ops_list_conflicts(casi_repo *repo, casi_entry_list *local,
+                             casi_entry_list *remote, casi_conflict_list *out);
+void casi_conflict_list_dispose(casi_conflict_list *list);
+
+/* Human-readable byte count for status/pull conflict reports. */
+int casi_ops_human_size(uint64_t bytes, casi_buf *out);
+
+/* Human-readable timestamp ("YYYY-MM-DD HH:MM") for a conflict report; the
+ * epoch is display-only and never part of a sync decision. */
+int casi_ops_format_time(uint64_t epoch, casi_buf *out);
+
 #endif /* CASI_SYNC_OPS_H */

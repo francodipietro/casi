@@ -53,6 +53,21 @@ git -C "$work/b/casi/repo.git" fetch -q origin \
 set +e; out=$("$casi" status 2>&1); set -e
 echo "$out" | grep -q '^machine:' || fail "status: missing machine header"
 
+# The conflict report must carry enough context to choose without decoding a
+# session id: the project, a short id, which machine the remote copy came from,
+# and how far the two sides still agree.
+echo "$out" | grep -q 'casi://src/p' || fail "status: conflict missing project path"
+echo "$out" | grep -q 'aaaaaaaa' || fail "status: conflict missing short id"
+echo "$out" | grep -q 'remote (machine-a)' || fail "status: conflict missing origin machine"
+echo "$out" | grep -q 'share 0 of 1 chunks' || fail "status: conflict missing common-prefix info"
+echo "  ok   status: conflict report carries project, id, origin, prefix"
+
+set +e; porc=$("$casi" status --porcelain 2>&1); set -e
+echo "$porc" | grep -q '^diverge	' || fail "status --porcelain: missing diverge line"
+echo "$porc" | grep -q '^diverge	aaaaaaaa' || fail "status --porcelain: diverge line missing short id"
+echo "$porc" | grep -q 'machine-a' || fail "status --porcelain: diverge line missing origin machine"
+echo "  ok   status --porcelain: diverge line is machine-readable"
+
 # Regression: warnings must not appear before the report they explain, even
 # when stdout is not a tty (which it never is inside `$(...)`).
 first_info=$(echo "$out" | grep -n '^machine:' | head -1 | cut -d: -f1)
@@ -75,6 +90,7 @@ echo "  ok   pull: unmapped parked copy reports actionable guidance"
 set +e; out=$("$casi" pull 2>&1); rc=$?; set -e
 [ "$rc" = 3 ] || fail "pull with a real divergence: exit $rc, want 3"
 echo "$out" | grep -qi 'unknown error' && fail "pull: leaked the 'unknown error' placeholder"
+echo "$out" | grep -q 'remote (machine-a)' || fail "pull: conflict missing origin machine"
 echo "  ok   pull: exit 3, no spurious error line"
 
 [ "$(cat "$sess_b")" = "$before_b" ] || fail "pull: local file was modified during a conflict"
@@ -86,9 +102,11 @@ grep -q 'edited on A' "$parked" || fail "parked copy does not contain the remote
 echo "  ok   pull: remote copy parked at $parked"
 
 out=$("$casi" conflicts) || fail "conflicts command"
-echo "$out" | grep -q "$(basename "$parked")" ||
-    fail "conflicts: parked remote copy was not listed"
-echo "  ok   conflicts: parked copy is discoverable"
+echo "$out" | grep -q 'casi://src/p' || fail "conflicts: parked copy missing project"
+echo "$out" | grep -q '\[remote\]' || fail "conflicts: parked copy missing side"
+echo "$out" | grep -q 'machine-a' || fail "conflicts: parked copy missing origin machine"
+echo "$out" | grep -q 'aaaaaaaa' || fail "conflicts: parked copy missing short id"
+echo "  ok   conflicts: parked copy is described, not just a path"
 
 "$casi" pull --theirs aaaaaaaa-0000-0000-0000-000000000000 >/dev/null || fail "pull --theirs"
 local_parked=$(find "$work/b/casi/conflicts" -name '*-local*.jsonl' 2>/dev/null | head -1)

@@ -16,6 +16,16 @@ mkdir -p "$work/a/src" "$work/a/.claude"
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
 "$casi" config root.src.path "$work/a/src" >/dev/null
+
+# Before anyone pushes, doctor explains the empty state instead of sounding
+# like a mandatory setup step is missing.
+out=$("$casi" doctor 2>&1)
+echo "$out" | grep -q 'reachable (empty' || fail "empty remote: missing empty state"
+echo "$out" | grep -q 'no shared configuration yet' || fail "no shared config: missing explanation"
+echo "$out" | grep -q 'expected before your first' || fail "no shared config: missing 'expected' wording"
+echo "$out" | grep -q 'none found yet' || fail "no sessions: missing inventory"
+echo "  ok   pre-push doctor explains the empty state"
+
 "$casi" push >/dev/null || fail "publish shared root"
 
 # B can contact the remote but has no local mapping yet.
@@ -39,4 +49,4 @@ mkdir -p "$work/b/code"
 "$casi" doctor >/dev/null || fail "mapped root"
 echo "  ok   mapped shared root and reachable remote are healthy"
 
-echo "doctor: 2 passed"
+echo "doctor: 3 passed"

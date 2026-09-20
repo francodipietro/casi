@@ -77,7 +77,9 @@ A session's `meta.json` is one JSON object followed by a newline:
   "projectPath": "casi://<root>/<path>",
   "chunks": 2,
   "chunkOids": ["<git-object-id>", "<git-object-id>"],
-  "bytes": 1234
+  "bytes": 1234,
+  "originMachine": "mac-air",
+  "updatedAt": 1757012345
 }
 ```
 
@@ -86,6 +88,13 @@ byte range: it reaches at least 1 MiB and then ends immediately after the next
 newline. The only short chunk is the final chunk; a single long line may exceed
 1 MiB. The metadata lists the chunk object IDs in the same order as the
 `chunks/` entries.
+
+`originMachine` and `updatedAt` are additive and optional: a reader treats their
+absence as unknown, and a store written before they existed reads normally.
+`originMachine` is the branch owner that wrote the copy. `updatedAt` is the
+source transcript's mtime in whole seconds since the Unix epoch; it exists only
+to let a conflict report say "when", never to choose a side — sync decisions
+remain the chunk-prefix rule and do not consult it.
 
 Project metadata exists when that project has memory files:
 
