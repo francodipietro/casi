@@ -28,7 +28,6 @@ printf '# Notes\nPath: %s/docs\n' "$work/a/src/proj" > "$base_a/memory/MEMORY.md
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" push >/dev/null || fail "push from A"
 git -C "$work/remote.git" ls-tree -r --name-only refs/heads/casi/machine-a |
     grep -q "subagents/agent-one.jsonl" || fail "subagent missing from remote tree"
@@ -39,13 +38,16 @@ git -C "$work/remote.git" ls-tree -r --name-only refs/heads/casi/machine-a |
 mkdir -p "$work/b/code/proj" "$work/b/.claude"
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-b >/dev/null
-"$casi" config root.src.path "$work/b/code" >/dev/null
 "$casi" doctor >/dev/null || fail "fetch remote state for B status"
 out=$("$casi" status --porcelain)
 echo "$out" | awk -F '\t' '$1 == "aux-pull" && $2 == 3 && $3 > 0 { found = 1 } END { exit !found }' ||
     fail "status does not report remote auxiliary bytes"
-"$casi" pull >/dev/null || fail "pull into B"
+# A local session registers the "proj" basename -> B's path.
 enc_b=$(echo "$work/b/code/proj" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$work/b/.claude/projects/$enc_b"
+printf '{"cwd":"%s","message":"B own"}\n' "$work/b/code/proj" \
+    > "$work/b/.claude/projects/$enc_b/bbbbbbbb-0000-0000-0000-000000000000.jsonl"
+"$casi" pull >/dev/null || fail "pull into B"
 base_b="$work/b/.claude/projects/$enc_b"
 [ -f "$base_b/$sid/subagents/agent-one.jsonl" ] || fail "subagent jsonl not materialised"
 [ -f "$base_b/$sid/subagents/agent-one.meta.json" ] || fail "subagent metadata not materialised"
@@ -88,7 +90,7 @@ set -e
 [ "$rc" = 3 ] || fail "auxiliary conflict: exit $rc, want 3"
 echo "$out" | grep -q 'auxiliary file differs and was left untouched' ||
     fail "auxiliary conflict: missing warning"
-echo "$out" | grep -Fq 'project casi://src/proj, project memory MEMORY.md' ||
+echo "$out" | grep -Fq 'project casi://proj, project memory MEMORY.md' ||
     fail "auxiliary conflict: warning does not identify the project scope"
 grep -q '# Notes' "$base_a/memory/MEMORY.md" ||
     fail "auxiliary conflict: local memory was overwritten"

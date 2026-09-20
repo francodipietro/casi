@@ -19,7 +19,7 @@ static int canonical_of(casi_ctx *ctx, const char *arg, casi_buf *out)
     if ((rc = casi_fs_realpath(arg, &absolute)) != CASI_OK)
         goto done;
 
-    rc = casi_roots_normalize_path(ctx->roots, casi_buf_cstr(&absolute), out);
+    rc = casi_roots_canonicalize_project(ctx->roots, casi_buf_cstr(&absolute), out);
 
 done:
     casi_buf_dispose(&absolute);

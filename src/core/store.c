@@ -678,7 +678,7 @@ done:
     return rc;
 }
 
-int casi_store_scan_local(casi_repo *repo, const casi_roots *roots,
+int casi_store_scan_local(casi_repo *repo, casi_roots *roots,
                           const casi_provider *provider,
                           const casi_strvec *exclude,
                           casi_entry_list *out, casi_asset_list *assets_out,

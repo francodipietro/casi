@@ -27,18 +27,17 @@ mk() { # home, cwd, sid, msg
 mkdir -p "$work/a/src/p"
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
 mk "$work/a" "$work/a/src/p" "11111111-0000-0000-0000-000000000000" "same"
 mk "$work/a" "$work/a/src/p" "22222222-0000-0000-0000-000000000000" "remote only"
 "$casi" push >/dev/null
 
-# B pulls, adds a local-only session, and diverges on "same".
+# B already has the project in use (registers the "p" basename), then pulls
+# and diverges on "same".
 mkdir -p "$work/b/src/p"
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-b >/dev/null
-"$casi" config root.src.path "$work/b/src" >/dev/null
-"$casi" pull >/dev/null
 mk "$work/b" "$work/b/src/p" "33333333-0000-0000-0000-000000000000" "local only"
+"$casi" pull >/dev/null
 enc_b=$(echo "$work/b/src/p" | sed 's/[^a-zA-Z0-9]/-/g')
 printf '{"cwd":"%s","message":"B edit"}\n' "$work/b/src/p" \
     >> "$work/b/.claude/projects/$enc_b/11111111-0000-0000-0000-000000000000.jsonl"

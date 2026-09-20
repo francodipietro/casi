@@ -8,9 +8,11 @@
 
 static void report_unmapped(const casi_buf *root)
 {
+    (void)root;
+    /* The error itself names the project and explains it is not here yet; the
+     * old "declare a root" hint no longer applies now that projects match by
+     * basename automatically. */
     casi_err("%s", casi_error_last());
-    casi_err("declare it with: casi config root.%s.path <local path>",
-             casi_buf_cstr(root));
 }
 
 static bool is_excluded(const casi_strvec *exclude, const char *project_path)

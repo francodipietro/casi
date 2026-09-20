@@ -30,7 +30,6 @@ size=$(wc -c < "$session" | tr -d ' ')
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" push >/dev/null || fail "initial large push"
 [ -s "$work/a/casi/index" ] || fail "initial scan did not write the stat cache"
 before=$(git -C "$work/remote.git" count-objects -v | awk '/^size-pack:/{print $2}')
@@ -58,16 +57,18 @@ delta=$((after - before))
 [ "$delta" -lt 1024 ] || fail "append transferred ${delta} KiB, want less than 1024 KiB"
 echo "  ok   append transferred ${delta} KiB (< 1 MiB)"
 
-# Pull through a second, isolated Claude home while deliberately mapping its
-# root to A's path.  That keeps normalized content and the original bytes
-# identical, so cmp proves the cached tail was not truncated or shifted.
+# Pull through a second, isolated Claude home while keeping the same local
+# path for the project, so normalized content and the original bytes stay
+# identical and cmp proves the cached tail was not truncated or shifted.
 mkdir -p "$work/b/.claude"
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-b >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
+mkdir -p "$work/b/.claude/projects/$encoded"
+printf '{"cwd":"%s","message":"B own"}\n' "$project" \
+    > "$work/b/.claude/projects/$encoded/bbbbbbbb-0000-0000-0000-000000000000.jsonl"
 "$casi" pull >/dev/null || fail "pull large transcript"
-restored=$(find "$work/b/.claude/projects" -name '*.jsonl')
-[ -n "$restored" ] || fail "no large transcript materialised"
+restored="$work/b/.claude/projects/$encoded/99999999-0000-0000-0000-000000000000.jsonl"
+[ -f "$restored" ] || fail "no large transcript materialised"
 cmp -s "$session" "$restored" || fail "remote transcript differs after cached append"
 echo "  ok   cached append round-trips byte-for-byte"
 

@@ -55,6 +55,12 @@ const char *casi_roots_path_at(const casi_roots *roots, size_t i);
 int casi_roots_normalize_path(const casi_roots *roots, const char *local, casi_buf *out);
 int casi_roots_denormalize_path(const casi_roots *roots, const char *canonical, casi_buf *out);
 
+/* Registers `local` as an auto root keyed by its basename and returns the
+ * canonical "casi://<basename>". This is how a project gets its stable,
+ * machine-independent name without a hand-declared root. `roots` is mutable
+ * because the registration is part of the call. */
+int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_buf *out);
+
 /*
  * Translate every path embedded anywhere in a blob of text -- the `cwd` field
  * of each record, and the paths scattered through message bodies and tool

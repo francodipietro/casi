@@ -198,7 +198,7 @@ done:
     return rc;
 }
 
-static int discover_one_project(const casi_roots *roots, const char *projects,
+static int discover_one_project(casi_roots *roots, const char *projects,
                                 const char *dir_name, casi_session_list *out,
                                 casi_aux_file_list *aux_out)
 {
@@ -233,8 +233,12 @@ static int discover_one_project(const casi_roots *roots, const char *projects,
             continue;
         }
 
-        if ((rc = casi_roots_normalize_path(roots, casi_buf_cstr(&raw_path),
-                                            &canonical)) != CASI_OK)
+        /* Register the project as an auto root keyed by its basename, then
+         * normalise through the (now complete) root table. This is what lets
+         * two machines with different layouts agree on one canonical name
+         * without either declaring a root by hand. */
+        if ((rc = casi_roots_canonicalize_project(roots, casi_buf_cstr(&raw_path),
+                                                  &canonical)) != CASI_OK)
             goto done;
         if ((rc = casi_project_id(casi_buf_cstr(&canonical), &pid)) != CASI_OK)
             goto done;
@@ -286,7 +290,7 @@ done:
     return rc;
 }
 
-static int claude_discover(const casi_roots *roots, casi_session_list *out,
+static int claude_discover(casi_roots *roots, casi_session_list *out,
                            casi_aux_file_list *aux_out)
 {
     casi_buf projects = CASI_BUF_INIT;

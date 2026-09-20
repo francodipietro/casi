@@ -22,15 +22,20 @@ printf '{"type":"user","cwd":"%s","message":"base"}\n' "$work/a/src/p" > "$sess_
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" push >/dev/null
 
+# B has the same project "p" in use (registers its basename -> B's path).
 mkdir -p "$work/b/src/p" "$work/b/.claude"
+enc_b=$(echo "$work/b/src/p" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$work/b/.claude/projects/$enc_b"
+printf '{"type":"user","cwd":"%s","message":"B own"}\n' "$work/b/src/p" \
+    > "$work/b/.claude/projects/$enc_b/bbbbbbbb-0000-0000-0000-000000000000.jsonl"
+
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-b >/dev/null
-"$casi" config root.src.path "$work/b/src" >/dev/null
 "$casi" pull >/dev/null
-sess_b=$(find "$work/b/.claude/projects" -name '*.jsonl')
+sess_b="$work/b/.claude/projects/$enc_b/aaaaaaaa-0000-0000-0000-000000000000.jsonl"
+[ -f "$sess_b" ] || fail "A's session was not materialised on B"
 
 # Both sides grow the SAME session with DIFFERENT content -> real divergence.
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
@@ -56,7 +61,7 @@ echo "$out" | grep -q '^machine:' || fail "status: missing machine header"
 # The conflict report must carry enough context to choose without decoding a
 # session id: the project, a short id, which machine the remote copy came from,
 # and how far the two sides still agree.
-echo "$out" | grep -q 'casi://src/p' || fail "status: conflict missing project path"
+echo "$out" | grep -q 'casi://p' || fail "status: conflict missing project path"
 echo "$out" | grep -q 'aaaaaaaa' || fail "status: conflict missing short id"
 echo "$out" | grep -q 'remote (machine-a)' || fail "status: conflict missing origin machine"
 echo "$out" | grep -q 'share 0 of 1 chunks' || fail "status: conflict missing common-prefix info"
@@ -76,17 +81,6 @@ first_warn=$(echo "$out" | grep -n '^warning:' | head -1 | cut -d: -f1)
 [ "$first_info" -lt "$first_warn" ] || fail "status: warning printed before the report (stdout buffering regression)"
 echo "  ok   status: conflict reported, in program order"
 
-# If the configured root disappeared since the last scan, parking the remote
-# side cannot proceed. The soft exit code is only useful if the command also
-# tells the user exactly how to restore that mapping.
-"$casi" config --unset root.src.path >/dev/null
-set +e; out=$("$casi" pull 2>&1); rc=$?; set -e
-[ "$rc" = 5 ] || fail "pull with unmapped conflict: exit $rc, want 5"
-echo "$out" | grep -q 'declare it with: casi config root.src.path <local path>' ||
-    fail "pull with unmapped conflict: missing root declaration guidance"
-echo "  ok   pull: unmapped parked copy reports actionable guidance"
-"$casi" config root.src.path "$work/b/src" >/dev/null
-
 set +e; out=$("$casi" pull 2>&1); rc=$?; set -e
 [ "$rc" = 3 ] || fail "pull with a real divergence: exit $rc, want 3"
 echo "$out" | grep -qi 'unknown error' && fail "pull: leaked the 'unknown error' placeholder"
@@ -102,7 +96,7 @@ grep -q 'edited on A' "$parked" || fail "parked copy does not contain the remote
 echo "  ok   pull: remote copy parked at $parked"
 
 out=$("$casi" conflicts) || fail "conflicts command"
-echo "$out" | grep -q 'casi://src/p' || fail "conflicts: parked copy missing project"
+echo "$out" | grep -q 'casi://p' || fail "conflicts: parked copy missing project"
 echo "$out" | grep -q '\[remote\]' || fail "conflicts: parked copy missing side"
 echo "$out" | grep -q 'machine-a' || fail "conflicts: parked copy missing origin machine"
 echo "$out" | grep -q 'aaaaaaaa' || fail "conflicts: parked copy missing short id"
@@ -117,4 +111,4 @@ echo "  ok   pull --theirs: local copy parked at $local_parked"
 grep -q 'edited on A' "$sess_b" || fail "--theirs did not take the remote copy"
 echo "  ok   pull --theirs: remote copy adopted"
 
-echo "conflict: 8 passed"
+echo "conflict: 9 passed"

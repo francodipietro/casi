@@ -85,7 +85,7 @@ casi_asset *casi_asset_list_find(casi_asset_list *list, casi_aux_kind kind,
  * and `excluded_out`, if given, receives how many sessions that removed --
  * so status can say what it is not showing rather than quietly showing less.
  */
-int casi_store_scan_local(casi_repo *repo, const casi_roots *roots,
+int casi_store_scan_local(casi_repo *repo, casi_roots *roots,
                           const casi_provider *provider,
                           const casi_strvec *exclude,
                           casi_entry_list *out, casi_asset_list *assets_out,

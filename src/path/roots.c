@@ -299,6 +299,29 @@ int casi_roots_normalize_path(const casi_roots *roots, const char *local, casi_b
     return casi_buf_put(out, local + match->path_len, len - match->path_len);
 }
 
+/* Last path component, trailing slashes ignored. A project's basename is its
+ * stable, human-facing identity across machines. */
+static const char *basename_of(const char *path)
+{
+    const char *end = path + strlen(path);
+    const char *p;
+
+    while (end > path && end[-1] == '/')
+        end--;
+    for (p = end; p > path && p[-1] != '/'; p--)
+        ;
+    return p;
+}
+
+int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_buf *out)
+{
+    int rc;
+
+    if ((rc = casi_roots_add(roots, basename_of(local), local)) != CASI_OK)
+        return rc;
+    return casi_roots_normalize_path(roots, local, out);
+}
+
 /* Splits "casi://<name>/<rest>" and looks the name up. */
 static const struct root_entry *lookup_canonical(const casi_roots *roots,
                                                  const char *canonical,
@@ -334,7 +357,7 @@ int casi_roots_denormalize_path(const casi_roots *roots, const char *canonical,
     match = lookup_canonical(roots, canonical, &name_len);
     if (match == NULL)
         return casi_error_set(CASI_EUNMAPPED,
-                              "no local path configured for root \"%.*s\"",
+                              "project \"%.*s\" is on the remote but not on this machine yet",
                               (int)name_len,
                               canonical + strlen(CASI_CANONICAL_SCHEME));
 
@@ -440,7 +463,7 @@ int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
                 (rc = casi_buf_put(unmapped_out, name, name_len)) != CASI_OK)
                 return rc;
             return casi_error_set(CASI_EUNMAPPED,
-                                  "no local path configured for root \"%.*s\"",
+                                  "project \"%.*s\" is on the remote but not on this machine yet",
                                   (int)name_len, name);
         }
 
