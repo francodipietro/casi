@@ -60,7 +60,7 @@ static int conflict_path(const casi_entry *entry, const char *side, casi_buf *pa
     }
 }
 
-static int asset_conflict_path(const casi_asset *asset, casi_buf *path)
+static int asset_conflict_path(const casi_asset *asset, const char *side, casi_buf *path)
 {
     const char *dir = casi_paths_conflicts_dir();
     const char *session = asset->session_id != NULL ? asset->session_id : "project";
@@ -75,11 +75,11 @@ static int asset_conflict_path(const casi_asset *asset, casi_buf *path)
 
         casi_buf_clear(path);
         if (suffix == 0)
-            rc = casi_buf_printf(path, "%s/aux-%s-%s-%s-remote", dir,
-                                 asset->project_id, session, asset->name);
+            rc = casi_buf_printf(path, "%s/aux-%s-%s-%s-%s", dir,
+                                 asset->project_id, session, asset->name, side);
         else
-            rc = casi_buf_printf(path, "%s/aux-%s-%s-%s-remote-%zu", dir,
-                                 asset->project_id, session, asset->name, suffix);
+            rc = casi_buf_printf(path, "%s/aux-%s-%s-%s-%s-%zu", dir,
+                                 asset->project_id, session, asset->name, side, suffix);
         if (rc != CASI_OK)
             return rc;
 
@@ -213,6 +213,7 @@ int casi_cmd_pull(int argc, char **argv)
     casi_buf unmapped = CASI_BUF_INIT, parked = CASI_BUF_INIT;
     const char *take_theirs = NULL;
     bool dry_run = false;
+    bool theirs_all = false;
     size_t pulled = 0, assets_pulled = 0, conflicts = 0, asset_conflicts = 0, i;
     int rc;
 
@@ -224,6 +225,8 @@ int casi_cmd_pull(int argc, char **argv)
     for (i = 0; (int)i < argc; i++) {
         if (strcmp(argv[i], "--dry-run") == 0) {
             dry_run = true;
+        } else if (strcmp(argv[i], "--theirs-all") == 0) {
+            theirs_all = true;
         } else if (strcmp(argv[i], "--theirs") == 0 && (int)i + 1 < argc) {
             take_theirs = argv[++i];
         } else {
@@ -263,8 +266,9 @@ int casi_cmd_pull(int argc, char **argv)
             continue;
 
         if (relation == CASI_SYNC_DIVERGED) {
-            bool override = take_theirs != NULL &&
-                            strcmp(take_theirs, r->session_id) == 0;
+            bool override = theirs_all ||
+                            (take_theirs != NULL &&
+                             strcmp(take_theirs, r->session_id) == 0);
 
             if (!override) {
                 conflicts++;
@@ -312,9 +316,37 @@ int casi_cmd_pull(int argc, char **argv)
         if (local_asset != NULL && git_oid_equal(&local_asset->oid, &remote_asset->oid))
             continue;
         if (local_asset != NULL) {
+            if (theirs_all) {
+                /* Park the local copy, then take the remote one. */
+                if (!dry_run) {
+                    if ((rc = asset_conflict_path(local_asset, "local", &parked)) != CASI_OK)
+                        goto done;
+                    casi_buf_clear(&unmapped);
+                    rc = casi_store_materialize_asset_to(ctx.repo, ctx.roots, local_asset,
+                                                         casi_buf_cstr(&parked), &unmapped);
+                    if (rc == CASI_EUNMAPPED) {
+                        report_unmapped(&unmapped);
+                        goto done;
+                    }
+                    if (rc != CASI_OK)
+                        goto done;
+
+                    casi_buf_clear(&unmapped);
+                    rc = casi_store_materialize_asset(ctx.repo, ctx.roots, ctx.provider,
+                                                      remote_asset, &unmapped);
+                    if (rc == CASI_EUNMAPPED) {
+                        report_unmapped(&unmapped);
+                        goto done;
+                    }
+                    if (rc != CASI_OK)
+                        goto done;
+                }
+                assets_pulled++;
+                continue;
+            }
             report_asset_conflict(remote_asset);
             if (!dry_run) {
-                if ((rc = asset_conflict_path(remote_asset, &parked)) != CASI_OK)
+                if ((rc = asset_conflict_path(remote_asset, "remote", &parked)) != CASI_OK)
                     goto done;
                 casi_buf_clear(&unmapped);
                 rc = casi_store_materialize_asset_to(ctx.repo, ctx.roots, remote_asset,

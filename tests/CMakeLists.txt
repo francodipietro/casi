@@ -46,6 +46,7 @@ set(CASI_INTEGRATION_TESTS
     two_machines
     conflict
     init
+    theirs_all
     shared_config
     doctor
     auxiliary_files

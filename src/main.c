@@ -12,7 +12,7 @@ const casi_command casi_commands[] = {
       "casi push [--dry-run]",
       casi_cmd_push,    false },
     { "pull",    "bring in the other machines' sessions",
-      "casi pull [--dry-run] [--theirs <session-id>]",
+      "casi pull [--dry-run] [--theirs <session-id>] [--theirs-all]",
       casi_cmd_pull,    false },
     { "sync",    "pull, then push",
       "casi sync",
