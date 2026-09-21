@@ -749,14 +749,19 @@ static int fetch_progress_cb(const git_indexer_progress *stats, void *payload)
 
 /* The remote (GitHub) streams its own progress over the sideband -- "Receiving
  * objects: 12%", "Resolving deltas", etc. This is the only honest progress
- * during an upload over SSH: libgit2's push_transfer_progress byte counter does
- * not advance for the pack stream. Show the server's words verbatim. */
+ * during an upload over SSH: libgit2's push_transfer_progress freezes at the
+ * last object it counted and is actively misleading. Show the server's words
+ * verbatim, stopping at the first newline/CR the server appends. */
 static int sideband_progress_cb(const char *str, int len, void *payload)
 {
+    int i;
+
     (void)payload;
 
-    if (len > 0)
-        casi_progress("%.*s", len, str);
+    for (i = 0; i < len && str[i] != '\r' && str[i] != '\n'; i++)
+        ;
+    if (i > 0)
+        casi_progress("%.*s", i, str);
     return 0;
 }
 
@@ -764,26 +769,18 @@ static int pack_progress_cb(int stage, uint32_t current, uint32_t total, void *p
 {
     (void)payload;
 
-    if (total > 0)
+    /* The pack is built locally; once it is complete the slow part -- the
+     * upload -- begins. Switch the label so the user knows what is happening
+     * even if the remote sends no sideband of its own. */
+    if (stage == 1 && total > 0 && current >= total) {
+        casi_progress("uploading...");
+    } else if (total > 0) {
         casi_progress("packing objects (%s): %u/%u",
                       stage == 0 ? "counting" : "compressing", current, total);
-    else
+    } else {
         casi_progress("packing objects (%s): %u",
                       stage == 0 ? "counting" : "compressing", current);
-    return 0;
-}
-
-static int push_progress_cb(unsigned int current, unsigned int total,
-                            size_t bytes, void *payload)
-{
-    (void)payload;
-    (void)bytes;
-
-    if (total > 0)
-        casi_progress("uploading objects: %u/%u (%u%%)", current, total,
-                      (unsigned)(current * 100 / total));
-    else
-        casi_progress("uploading objects: %u", current);
+    }
     return 0;
 }
 
@@ -795,7 +792,6 @@ static void init_callbacks(git_remote_callbacks *cb, struct ssh_auth *auth)
     cb->sideband_progress = sideband_progress_cb;
     cb->pack_progress = pack_progress_cb;
     cb->transfer_progress = fetch_progress_cb;
-    cb->push_transfer_progress = push_progress_cb;
     cb->payload = auth;
 }
 
