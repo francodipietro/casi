@@ -19,6 +19,8 @@ mkdir -p "$work/a/.claude/projects/$enc_a"
 sess="$work/a/.claude/projects/$enc_a/11111111-2222-3333-4444-555555555555.jsonl"
 printf '{"type":"user","cwd":"%s","message":"see %s/main.c"}\n' \
     "$work/a/src/myproj" "$work/a/src/myproj" > "$sess"
+sed -i.bak "s#main.c#main.c and $work/a/notes.md#" "$sess"
+rm -f "$sess.bak"
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 set +e; out=$("$casi" init --machine 'bad name' 2>&1); rc=$?; set -e
@@ -55,7 +57,9 @@ got="$work/b/.claude/projects/$enc_b/11111111-2222-3333-4444-555555555555.jsonl"
 # Both the cwd field AND the path embedded in message text must translate.
 grep -q "\"cwd\":\"$work/b/code/myproj\"" "$got" || fail "cwd was not translated"
 grep -q "$work/b/code/myproj/main.c" "$got" || fail "embedded path was not translated"
+grep -q "$work/b/notes.md" "$got" || fail "home path was not translated"
 grep -q "$work/a/src" "$got" && fail "machine A's path leaked into B's copy"
+grep -q "$work/a/notes.md" "$got" && fail "machine A's home path leaked into B's copy"
 echo "  ok   pull into B: layout re-encoded, cwd and embedded paths translated"
 
 # --- round-trip: B can continue A's session and A must accept that append ---

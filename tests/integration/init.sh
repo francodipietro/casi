@@ -49,4 +49,12 @@ out=$(CASI_HOME="$work/casi-ok" CASI_CLAUDE_HOME="$work/claude" \
 echo "$out" | grep -q 'remote verified' || fail "reachable remote: missing verification"
 echo "  ok   init: reachable remote reports verification"
 
-echo "init: 4 passed"
+# Square brackets are valid in a URL path and in IPv6 host literals; they are
+# not sufficient evidence that the argument is a pasted Markdown link.
+git init -q --bare "$work/remote[1].git"
+out=$(CASI_HOME="$work/casi-brackets" CASI_CLAUDE_HOME="$work/claude" \
+    "$casi" init --remote "file://$work/remote[1].git" --machine machine-b 2>&1)
+echo "$out" | grep -q 'remote verified' || fail "bracket URL: valid URL was rejected"
+echo "  ok   init: bracketed URL is accepted"
+
+echo "init: 5 passed"

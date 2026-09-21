@@ -23,6 +23,9 @@ static int rewrite_one(const char *in, size_t len, const char *from, const char 
     size_t i, span = 0;
     int rc;
 
+    if (from_len == 0)
+        return casi_error_set(CASI_EINVAL, "foreign home cannot be empty");
+
     casi_buf_clear(out);
     if ((rc = casi_buf_grow(out, len)) != CASI_OK)
         return rc;
@@ -108,6 +111,10 @@ int casi_cmd_migrate(int argc, char **argv)
     if (argc < 1)
         return casi_error_set(CASI_EINVAL, "usage: %s",
                               casi_command_lookup("migrate")->usage);
+
+    for (i = 0; i < (size_t)argc; i++)
+        if (argv[i][0] == '\0')
+            return casi_error_set(CASI_EINVAL, "foreign home cannot be empty");
 
     if ((local_home = casi_fs_home()) == NULL)
         return casi_error_set(CASI_ERROR, "cannot resolve the home directory");

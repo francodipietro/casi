@@ -18,8 +18,8 @@
  *     [root "bookit"] path = /Users/fdipietro/src/bookit
  *
  * The canonical, machine-neutral form is "casi://<root>/<rest>". A root's name
- * is its project basename, discovered automatically; paths outside any known
- * project stay raw and identical on every machine.
+ * is its project basename, discovered automatically; paths outside a project
+ * use the portable home fallback when applicable and otherwise stay raw.
  *
  * Matching is longest-prefix and respects component boundaries: the root
  * "/a/src" matches "/a/src/x" but never "/a/srcfoo".
@@ -38,7 +38,7 @@ int  casi_roots_add(casi_roots *roots, const char *name, const char *local_path)
 /* True when `name` can safely be used as one component of a canonical root. */
 bool casi_root_name_is_valid(const char *name);
 /* Reads every root.<name>.path out of the config, then adds the implicit
- * "~" root from the environment. */
+ * "~" root from the environment as the lowest-priority fallback. */
 int  casi_roots_load(casi_roots *roots, casi_config *cfg);
 
 size_t      casi_roots_count(const casi_roots *roots);

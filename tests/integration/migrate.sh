@@ -17,6 +17,13 @@ mkdir -p "$work/home/src/p" "$work/home/.claude"
 export HOME="$work/home" CASI_HOME="$work/home/casi" CASI_CLAUDE_HOME="$work/home/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
 
+set +e
+out=$("$casi" migrate '' 2>&1)
+rc=$?
+set -e
+[ "$rc" = 2 ] || fail "empty foreign home: exit $rc, want 2"
+echo "$out" | grep -q 'cannot be empty' || fail "empty foreign home: missing error"
+
 enc=$(echo "$work/home/src/p" | sed 's/[^a-zA-Z0-9]/-/g')
 mkdir -p "$work/home/.claude/projects/$enc"
 f="$work/home/.claude/projects/$enc/11111111-0000-0000-0000-000000000000.jsonl"

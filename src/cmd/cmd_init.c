@@ -22,7 +22,7 @@ static int validate_remote_url(const char *url)
     if (url == NULL || url[0] == '\0')
         return casi_error_set(CASI_EINVAL, "remote URL is empty");
 
-    if (strstr(url, "](") != NULL || strchr(url, '[') != NULL || strchr(url, ']') != NULL)
+    if (strstr(url, "](") != NULL)
         return casi_error_set(CASI_EINVAL,
                               "this looks like a pasted Markdown link; "
                               "run `casi init --remote <url>` with the plain URL only");
