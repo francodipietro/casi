@@ -54,6 +54,7 @@ set(CASI_INTEGRATION_TESTS
     format
     encryption
     diagnose
+    migrate
     large_session
     gc
     interruption
