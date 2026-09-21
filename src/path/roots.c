@@ -186,17 +186,17 @@ static int load_one(const char *key, const char *value, void *payload)
 int casi_roots_load(casi_roots *roots, casi_config *cfg)
 {
     struct load_ctx ctx = { roots };
-    const char *home;
     int rc;
 
     if ((rc = casi_config_foreach(cfg, load_one, &ctx)) != CASI_OK)
         return rc;
 
-    /* $HOME last and shortest, so any explicit root outranks it. */
-    if ((home = casi_fs_home()) != NULL &&
-        (rc = casi_roots_add(roots, CASI_HOME_ROOT, home)) != CASI_OK)
-        return rc;
-
+    /* No implicit "$HOME" root. A home-relative root is machine-specific: it
+     * normalizes only THIS machine's home and leaves every other machine's home
+     * raw, so the same transcript normalizes differently on two machines and
+     * re-diverges forever after a migration with mixed paths. Projects now
+     * match by basename; paths outside a project stay raw and identical
+     * everywhere, which is symmetric and stable. */
     return CASI_OK;
 }
 

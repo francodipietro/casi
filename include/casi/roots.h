@@ -17,9 +17,9 @@
  *     [root "src"]    path = /Users/fdipietro/src
  *     [root "bookit"] path = /Users/fdipietro/src/bookit
  *
- * The canonical, machine-neutral form is "casi://<root>/<rest>". $HOME is an
- * implicit root named "~" with the lowest priority, so a path under no
- * configured root still travels.
+ * The canonical, machine-neutral form is "casi://<root>/<rest>". A root's name
+ * is its project basename, discovered automatically; paths outside any known
+ * project stay raw and identical on every machine.
  *
  * Matching is longest-prefix and respects component boundaries: the root
  * "/a/src" matches "/a/src/x" but never "/a/srcfoo".

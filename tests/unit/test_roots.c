@@ -346,8 +346,10 @@ static void test_loading_roots_from_config(void)
     ASSERT_OK(casi_roots_new(&r));
     ASSERT_OK(casi_roots_load(r, cfg));
 
-    /* Two configured roots plus the implicit "~". */
-    ASSERT_EQ_INT(casi_roots_count(r), 3);
+    /* Two configured roots, no implicit "~": the home root was removed so a
+     * transcript with another machine's paths normalizes identically on every
+     * machine. */
+    ASSERT_EQ_INT(casi_roots_count(r), 2);
     check_norm(r, "/Users/f/src/bookit/x", "casi://bookit/x");
     check_norm(r, "/Users/f/src/other", "casi://src/other");
 
