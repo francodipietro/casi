@@ -2,6 +2,7 @@
 #include "casi/roots.h"
 #include "casi/error.h"
 #include "casi/fs.h"
+#include "casi/log.h"
 #include "casi/str.h"
 
 #include <stdlib.h>
@@ -313,11 +314,30 @@ static const char *basename_of(const char *path)
     return p;
 }
 
+static const char *root_path_by_name(const casi_roots *roots, const char *name)
+{
+    size_t i;
+
+    for (i = 0; i < roots->len; i++)
+        if (strcmp(roots->items[i].name, name) == 0)
+            return roots->items[i].path;
+    return NULL;
+}
+
 int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_buf *out)
 {
+    const char *base = basename_of(local);
+    const char *existing = root_path_by_name(roots, base);
     int rc;
 
-    if ((rc = casi_roots_add(roots, basename_of(local), local)) != CASI_OK)
+    /* Two directories with the same basename are ambiguous: the name cannot
+     * stand for both. Report it so the user can keep one and move the other,
+     * instead of silently letting the last one win. */
+    if (existing != NULL && strcmp(existing, local) != 0)
+        casi_warn("project \"%s\" is in two places: \"%s\" and \"%s\"",
+                  base, existing, local);
+
+    if ((rc = casi_roots_add(roots, base, local)) != CASI_OK)
         return rc;
     return casi_roots_normalize_path(roots, local, out);
 }
