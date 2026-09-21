@@ -19,7 +19,6 @@ printf '{"cwd":"%s","message":"format fixture"}\n' "$work/a/src/p" \
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" push >/dev/null
 
 old_commit=$(git -C "$work/remote.git" rev-parse refs/heads/casi/machine-a)
@@ -38,7 +37,6 @@ git -C "$work/remote.git" update-ref refs/heads/casi/machine-a "$bad_commit" "$o
 mkdir -p "$work/b/src/p" "$work/b/.claude"
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-b >/dev/null
-"$casi" config root.src.path "$work/b/src" >/dev/null
 set +e
 out=$("$casi" pull 2>&1)
 rc=$?

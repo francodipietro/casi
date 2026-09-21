@@ -346,7 +346,7 @@ static void test_loading_roots_from_config(void)
     ASSERT_OK(casi_roots_new(&r));
     ASSERT_OK(casi_roots_load(r, cfg));
 
-    /* Two configured roots plus the implicit "~". */
+    /* Two configured roots plus the implicit home fallback. */
     ASSERT_EQ_INT(casi_roots_count(r), 3);
     check_norm(r, "/Users/f/src/bookit/x", "casi://bookit/x");
     check_norm(r, "/Users/f/src/other", "casi://src/other");
@@ -354,6 +354,36 @@ static void test_loading_roots_from_config(void)
     casi_roots_free(r);
     casi_config_free(cfg);
     casi_buf_dispose(&path);
+}
+
+static void test_auto_project_names_encode_invalid_bytes(void)
+{
+    casi_roots *r = NULL;
+    casi_buf in = CASI_BUF_INIT, out = CASI_BUF_INIT;
+
+    ASSERT_OK(casi_roots_new(&r));
+    ASSERT_OK(casi_roots_canonicalize_project(r, "/work/My Project", &out));
+    ASSERT_EQ_STR(casi_buf_cstr(&out), "casi://My~20Project");
+    ASSERT_OK(casi_buf_puts(&in, "cwd /work/My Project/file"));
+    ASSERT_OK(casi_roots_normalize_text(r, &in, &out));
+    ASSERT_EQ_STR(casi_buf_cstr(&out), "cwd casi://My~20Project/file");
+
+    casi_buf_dispose(&in);
+    casi_buf_dispose(&out);
+    casi_roots_free(r);
+}
+
+static void test_auto_project_name_collision_is_rejected(void)
+{
+    casi_roots *r = NULL;
+    casi_buf out = CASI_BUF_INIT;
+
+    ASSERT_OK(casi_roots_new(&r));
+    ASSERT_OK(casi_roots_canonicalize_project(r, "/one/app", &out));
+    ASSERT_RC(casi_roots_canonicalize_project(r, "/two/app", &out), CASI_EEXISTS);
+
+    casi_buf_dispose(&out);
+    casi_roots_free(r);
 }
 
 int main(void)
@@ -382,6 +412,8 @@ int main(void)
     RUN_TEST(test_text_root_name_stops_at_path_punctuation);
     RUN_TEST(test_text_bare_scheme_is_literal);
     RUN_TEST(test_loading_roots_from_config);
+    RUN_TEST(test_auto_project_names_encode_invalid_bytes);
+    RUN_TEST(test_auto_project_name_collision_is_rejected);
 
     status = casi_test_report("roots");
     casi_shutdown();

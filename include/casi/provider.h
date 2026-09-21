@@ -61,8 +61,10 @@ typedef struct casi_provider {
     const char *name;
 
     /* Enumerates every session this machine holds, with paths already
-     * normalised through `roots`. */
-    int (*discover)(const casi_roots *roots, casi_session_list *sessions,
+     * normalised through `roots`. `roots` is mutable: the provider registers
+     * one auto root per project it finds (name = project basename), so no
+     * machine has to declare roots by hand. */
+    int (*discover)(casi_roots *roots, casi_session_list *sessions,
                     casi_aux_file_list *aux_files);
 
     /* Absolute local path where a session with this canonical project path

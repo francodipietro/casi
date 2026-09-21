@@ -2,6 +2,7 @@
 #include "casi/roots.h"
 #include "casi/error.h"
 #include "casi/fs.h"
+#include "casi/log.h"
 #include "casi/str.h"
 
 #include <stdlib.h>
@@ -192,7 +193,9 @@ int casi_roots_load(casi_roots *roots, casi_config *cfg)
     if ((rc = casi_config_foreach(cfg, load_one, &ctx)) != CASI_OK)
         return rc;
 
-    /* $HOME last and shortest, so any explicit root outranks it. */
+    /* Keep the home root as the lowest-priority fallback. Project roots are
+     * longer and therefore win for project-local paths, while references to
+     * other files under the user's home remain portable across machines. */
     if ((home = casi_fs_home()) != NULL &&
         (rc = casi_roots_add(roots, CASI_HOME_ROOT, home)) != CASI_OK)
         return rc;
@@ -299,6 +302,98 @@ int casi_roots_normalize_path(const casi_roots *roots, const char *local, casi_b
     return casi_buf_put(out, local + match->path_len, len - match->path_len);
 }
 
+/* Last path component, trailing slashes ignored. A project's basename is its
+ * stable, human-facing identity across machines. */
+static const char *basename_of(const char *path)
+{
+    const char *end = path + strlen(path);
+    const char *p;
+
+    while (end > path && end[-1] == '/')
+        end--;
+    for (p = end; p > path && p[-1] != '/'; p--)
+        ;
+    return p;
+}
+
+static const char *root_path_by_name(const casi_roots *roots, const char *name)
+{
+    size_t i;
+
+    for (i = 0; i < roots->len; i++)
+        if (strcmp(roots->items[i].name, name) == 0)
+            return roots->items[i].path;
+    return NULL;
+}
+
+static int auto_root_name(const char *base, casi_buf *out)
+{
+    const unsigned char *p = (const unsigned char *)base;
+    int rc;
+
+    casi_buf_clear(out);
+    for (; *p != '\0'; p++) {
+        /* Keep the readable spelling for ordinary names, but encode every
+         * other byte (including '~') so the mapping is injective: a literal
+         * "~20" cannot collide with a basename containing a space. */
+        if (((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'z') ||
+             (*p >= 'A' && *p <= 'Z') || *p == '-' || *p == '_' ||
+             *p == '.' || *p == '@' || *p == '+')) {
+            if ((rc = casi_buf_putc(out, (char)*p)) != CASI_OK)
+                return rc;
+        } else if (*p >= 0x80) {
+            /* UTF-8 bytes are already valid path-component bytes. */
+            if ((rc = casi_buf_putc(out, (char)*p)) != CASI_OK)
+                return rc;
+        } else if ((rc = casi_buf_printf(out, "~%02X", *p)) != CASI_OK) {
+            return rc;
+        }
+    }
+    if (out->len == 0)
+        return casi_error_set(CASI_EINVAL, "project path has no basename");
+    return CASI_OK;
+}
+
+static bool same_path_ignoring_trailing_slashes(const char *a, const char *b)
+{
+    size_t alen = strlen(a), blen = strlen(b);
+
+    while (alen > 1 && a[alen - 1] == '/')
+        alen--;
+    while (blen > 1 && b[blen - 1] == '/')
+        blen--;
+    return alen == blen && memcmp(a, b, alen) == 0;
+}
+
+int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_buf *out)
+{
+    const char *base = basename_of(local);
+    casi_buf name = CASI_BUF_INIT;
+    const char *existing;
+    int rc;
+
+    if ((rc = auto_root_name(base, &name)) != CASI_OK)
+        goto done;
+    existing = root_path_by_name(roots, casi_buf_cstr(&name));
+
+    /* Two directories with the same basename are ambiguous: refusing the
+     * second registration prevents the later discovery from silently
+     * rerouting the first project's sessions. */
+    if (existing != NULL && !same_path_ignoring_trailing_slashes(existing, local)) {
+        rc = casi_error_set(CASI_EEXISTS,
+                            "project basename \"%s\" is ambiguous: \"%s\" and \"%s\"",
+                            base, existing, local);
+        goto done;
+    }
+
+    if ((rc = casi_roots_add(roots, casi_buf_cstr(&name), local)) == CASI_OK)
+        rc = casi_roots_normalize_path(roots, local, out);
+
+done:
+    casi_buf_dispose(&name);
+    return rc;
+}
+
 /* Splits "casi://<name>/<rest>" and looks the name up. */
 static const struct root_entry *lookup_canonical(const casi_roots *roots,
                                                  const char *canonical,
@@ -334,7 +429,7 @@ int casi_roots_denormalize_path(const casi_roots *roots, const char *canonical,
     match = lookup_canonical(roots, canonical, &name_len);
     if (match == NULL)
         return casi_error_set(CASI_EUNMAPPED,
-                              "no local path configured for root \"%.*s\"",
+                              "project \"%.*s\" is on the remote but not on this machine yet",
                               (int)name_len,
                               canonical + strlen(CASI_CANONICAL_SCHEME));
 
@@ -440,7 +535,7 @@ int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
                 (rc = casi_buf_put(unmapped_out, name, name_len)) != CASI_OK)
                 return rc;
             return casi_error_set(CASI_EUNMAPPED,
-                                  "no local path configured for root \"%.*s\"",
+                                  "project \"%.*s\" is on the remote but not on this machine yet",
                                   (int)name_len, name);
         }
 

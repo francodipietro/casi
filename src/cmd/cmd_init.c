@@ -12,11 +12,36 @@ static int default_machine(casi_buf *out)
     return casi_fs_hostname(out);
 }
 
+/* A pasted Markdown link ("[text](url)") or a URL with stray whitespace is the
+ * most common first-run mistake. Reject it here, before a store or remote is
+ * created, so `casi init` never announces success for a URL it never tested. */
+static int validate_remote_url(const char *url)
+{
+    const char *p;
+
+    if (url == NULL || url[0] == '\0')
+        return casi_error_set(CASI_EINVAL, "remote URL is empty");
+
+    if (strstr(url, "](") != NULL)
+        return casi_error_set(CASI_EINVAL,
+                              "this looks like a pasted Markdown link; "
+                              "run `casi init --remote <url>` with the plain URL only");
+
+    for (p = url; *p != '\0'; p++)
+        if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            return casi_error_set(CASI_EINVAL,
+                                  "remote URL contains spaces; paste the URL alone, "
+                                  "without surrounding text");
+
+    return CASI_OK;
+}
+
 int casi_cmd_init(int argc, char **argv)
 {
     casi_config *cfg = NULL;
     casi_repo *repo = NULL;
     casi_buf machine = CASI_BUF_INIT, existing = CASI_BUF_INIT;
+    casi_buf configured = CASI_BUF_INIT;
     const char *remote = NULL, *machine_arg = NULL, *keyfile_arg = NULL;
     bool encrypt = false;
     int i, rc;
@@ -66,6 +91,9 @@ int casi_cmd_init(int argc, char **argv)
                             "--encrypt requires --remote so casi can protect a new remote");
         goto done;
     }
+
+    if (remote != NULL && (rc = validate_remote_url(remote)) != CASI_OK)
+        goto done;
 
     if ((rc = casi_repo_init(&repo)) != CASI_OK)
         goto done;
@@ -133,6 +161,17 @@ encrypt_done:
         casi_strvec_dispose(&machines);
         if (rc != CASI_OK)
             goto done;
+    } else if (remote != NULL) {
+        /* A plain init used to save the URL without testing it, so a mistyped
+         * or unauthenticated remote only surfaced at the first push. Verify
+         * reachability now so "store ready" means what it says. */
+        if ((rc = casi_repo_fetch(repo)) != CASI_OK) {
+            casi_error_clear();
+            rc = casi_error_set(CASI_ENETWORK,
+                                "cannot reach \"%s\" -- check the URL and your SSH/HTTPS credentials",
+                                remote);
+            goto done;
+        }
     }
 
     if ((rc = casi_config_set_string(cfg, "core.machine",
@@ -142,10 +181,16 @@ encrypt_done:
         goto done;
 
     casi_info("casi store ready for machine \"%s\"", casi_buf_cstr(&machine));
-    if (remote != NULL)
-        casi_info("  remote: %s", remote);
-    else
-        casi_info("  no remote yet -- re-run with `casi init --remote <url>`");
+    if (remote != NULL) {
+        casi_info("  remote verified: %s", remote);
+        if (!encrypt)
+            casi_info("  next: `casi push` to upload this machine's sessions");
+    } else if (casi_repo_remote_url(repo, &configured) == CASI_OK) {
+        casi_info("  remote: %s", casi_buf_cstr(&configured));
+    } else {
+        casi_error_clear();
+        casi_info("  no remote yet -- run `casi init --remote <url>` to connect one");
+    }
 
     rc = CASI_OK;
 
@@ -154,5 +199,6 @@ done:
     casi_config_free(cfg);
     casi_buf_dispose(&machine);
     casi_buf_dispose(&existing);
+    casi_buf_dispose(&configured);
     return rc;
 }

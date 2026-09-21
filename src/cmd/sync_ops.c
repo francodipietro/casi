@@ -2,7 +2,10 @@
 #include "cmd/sync_ops.h"
 #include "casi/casi.h"
 
+#include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 int casi_ops_scan_local(casi_ctx *ctx, casi_entry_list *out,
                          casi_asset_list *assets_out, size_t *excluded_out)
@@ -107,7 +110,7 @@ int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out,
 {
     casi_strvec machines = CASI_STRVEC_INIT;
     casi_buf refname = CASI_BUF_INIT;
-    size_t i;
+    size_t i, j;
     int rc;
 
     if ((rc = casi_repo_list_machines(ctx->repo, &machines)) != CASI_OK)
@@ -137,8 +140,24 @@ int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out,
         memset(&branch_assets, 0, sizeof(branch_assets));
         rc = casi_store_read_tree(ctx->repo, &tree, ctx->provider->name, &branch,
                                   &branch_assets);
-        if (rc == CASI_OK)
-            rc = merge_branch(ctx->repo, out, &branch);
+        if (rc != CASI_OK)
+            goto done;
+
+        /* Remember which machine carried each copy before merge_branch collapses
+         * the union. A conflict report needs this to say where the remote side
+         * came from. */
+        for (j = 0; j < branch.len; j++) {
+            if (branch.items[j].origin_machine != NULL)
+                continue;
+            branch.items[j].origin_machine = casi_strdup(machines.items[i]);
+            if (branch.items[j].origin_machine == NULL) {
+                rc = casi_error_set(CASI_ENOMEM,
+                                    "out of memory recording remote machine");
+                goto done;
+            }
+        }
+
+        rc = merge_branch(ctx->repo, out, &branch);
         if (rc == CASI_OK)
             rc = merge_assets(assets_out, &branch_assets);
         casi_entry_list_dispose(&branch);
@@ -228,6 +247,76 @@ int casi_ops_summarise(casi_repo *repo, casi_entry_list *local,
             out->auxiliary_to_pull++;
             out->auxiliary_pull_bytes += remote_asset->bytes;
         }
+    }
+
+    return CASI_OK;
+}
+
+int casi_ops_human_size(uint64_t bytes, casi_buf *out)
+{
+    casi_buf_clear(out);
+    if (bytes >= 1024ULL * 1024 * 1024)
+        return casi_buf_printf(out, "%.1f GB", (double)bytes / (1024 * 1024 * 1024));
+    if (bytes >= 1024 * 1024)
+        return casi_buf_printf(out, "%.1f MB", (double)bytes / (1024 * 1024));
+    if (bytes >= 1024)
+        return casi_buf_printf(out, "%.0f KB", (double)bytes / 1024);
+    return casi_buf_printf(out, "%" PRIu64 " B", bytes);
+}
+
+int casi_ops_format_time(uint64_t epoch, casi_buf *out)
+{
+    time_t t = (time_t)epoch;
+    struct tm tm;
+    char buf[32];
+
+    casi_buf_clear(out);
+    if (epoch == 0 || localtime_r(&t, &tm) == NULL)
+        return casi_buf_puts(out, "unknown");
+    if (strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tm) == 0)
+        return casi_buf_puts(out, "unknown");
+    return casi_buf_puts(out, buf);
+}
+
+void casi_conflict_list_dispose(casi_conflict_list *list)
+{
+    free(list->items);
+    memset(list, 0, sizeof(*list));
+}
+
+int casi_ops_list_conflicts(casi_repo *repo, casi_entry_list *local,
+                            casi_entry_list *remote, casi_conflict_list *out)
+{
+    size_t i;
+    int rc;
+
+    memset(out, 0, sizeof(*out));
+
+    for (i = 0; i < local->len; i++) {
+        casi_entry *l = &local->items[i];
+        casi_entry *r = casi_entry_list_find(remote, l->session_id);
+        casi_sync_relation relation;
+
+        if (r == NULL)
+            continue;
+        if ((rc = casi_sync_compare(repo, l, r, &relation)) != CASI_OK)
+            return rc;
+        if (relation != CASI_SYNC_DIVERGED)
+            continue;
+
+        if (out->len == out->cap) {
+            size_t cap = out->cap ? out->cap * 2 : 16;
+            casi_conflict *p = realloc(out->items, cap * sizeof(*p));
+
+            if (p == NULL)
+                return casi_error_set(CASI_ENOMEM, "out of memory listing conflicts");
+            out->items = p;
+            out->cap = cap;
+        }
+        out->items[out->len].local = l;
+        out->items[out->len].remote = r;
+        out->items[out->len].common_chunks = casi_sync_common_prefix(l, r);
+        out->len++;
     }
 
     return CASI_OK;

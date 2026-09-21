@@ -17,9 +17,9 @@
  *     [root "src"]    path = /Users/fdipietro/src
  *     [root "bookit"] path = /Users/fdipietro/src/bookit
  *
- * The canonical, machine-neutral form is "casi://<root>/<rest>". $HOME is an
- * implicit root named "~" with the lowest priority, so a path under no
- * configured root still travels.
+ * The canonical, machine-neutral form is "casi://<root>/<rest>". A root's name
+ * is its project basename, discovered automatically; paths outside a project
+ * use the portable home fallback when applicable and otherwise stay raw.
  *
  * Matching is longest-prefix and respects component boundaries: the root
  * "/a/src" matches "/a/src/x" but never "/a/srcfoo".
@@ -38,7 +38,7 @@ int  casi_roots_add(casi_roots *roots, const char *name, const char *local_path)
 /* True when `name` can safely be used as one component of a canonical root. */
 bool casi_root_name_is_valid(const char *name);
 /* Reads every root.<name>.path out of the config, then adds the implicit
- * "~" root from the environment. */
+ * "~" root from the environment as the lowest-priority fallback. */
 int  casi_roots_load(casi_roots *roots, casi_config *cfg);
 
 size_t      casi_roots_count(const casi_roots *roots);
@@ -54,6 +54,12 @@ const char *casi_roots_path_at(const casi_roots *roots, size_t i);
  */
 int casi_roots_normalize_path(const casi_roots *roots, const char *local, casi_buf *out);
 int casi_roots_denormalize_path(const casi_roots *roots, const char *canonical, casi_buf *out);
+
+/* Registers `local` as an auto root keyed by its basename and returns the
+ * canonical "casi://<basename>". This is how a project gets its stable,
+ * machine-independent name without a hand-declared root. `roots` is mutable
+ * because the registration is part of the call. */
+int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_buf *out);
 
 /*
  * Translate every path embedded anywhere in a blob of text -- the `cwd` field

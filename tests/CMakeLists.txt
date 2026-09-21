@@ -45,12 +45,16 @@ add_test(NAME cli_errors
 set(CASI_INTEGRATION_TESTS
     two_machines
     conflict
+    init
+    theirs_all
     shared_config
     doctor
     auxiliary_files
     nested_roots
     format
     encryption
+    diagnose
+    migrate
     large_session
     gc
     interruption

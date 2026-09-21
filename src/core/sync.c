@@ -82,3 +82,16 @@ const char *casi_sync_relation_name(casi_sync_relation relation)
     }
     return "unknown";
 }
+
+size_t casi_sync_common_prefix(const casi_entry *a, const casi_entry *b)
+{
+    size_t shorter = a->chunk_count < b->chunk_count
+                   ? a->chunk_count : b->chunk_count;
+    size_t i;
+
+    for (i = 0; i < shorter; i++)
+        if (!git_oid_equal(&a->chunks[i], &b->chunks[i]))
+            return i;
+
+    return shorter;
+}

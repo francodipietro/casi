@@ -128,21 +128,6 @@ done:
     return rc;
 }
 
-static int add_local_root_names(casi_ctx *ctx, casi_shared_config *shared)
-{
-    size_t i;
-    int rc;
-
-    for (i = 0; i < casi_roots_count(ctx->roots); i++) {
-        const char *name = casi_roots_name_at(ctx->roots, i);
-
-        if (strcmp(name, CASI_HOME_ROOT) != 0 &&
-            (rc = casi_shared_config_add_root(shared, name)) != CASI_OK)
-            return rc;
-    }
-    return CASI_OK;
-}
-
 int casi_ctx_publish_shared_config(casi_ctx *ctx)
 {
     unsigned int attempt;
@@ -167,8 +152,6 @@ int casi_ctx_publish_shared_config(casi_ctx *ctx)
             goto done;
         for (i = 0; rc == CASI_OK && i < legacy.len; i++)
             rc = casi_shared_config_add_exclude(&shared, legacy.items[i]);
-        if (rc == CASI_OK)
-            rc = add_local_root_names(ctx, &shared);
         if (rc == CASI_OK)
             rc = casi_shared_config_commit_push(ctx->repo, &shared, &ctx->crypto,
                                                  ctx->machine);

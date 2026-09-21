@@ -22,16 +22,20 @@ printf 'not a complete JSONL transcript\n' > "$session.casi-tmp-interrupted"
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" push >/dev/null || fail "push with interrupted temporary sibling"
 
-mkdir -p "$work/b/.claude"
+# B has the project in use, registering the "p" basename.
+mkdir -p "$work/b/src/p" "$work/b/.claude"
+enc_b=$(echo "$work/b/src/p" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$work/b/.claude/projects/$enc_b"
+printf '{"cwd":"%s","message":"B own"}\n' "$work/b/src/p" \
+    > "$work/b/.claude/projects/$enc_b/bbbbbbbb-0000-0000-0000-000000000000.jsonl"
+
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-b >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" pull >/dev/null || fail "pull"
-restored=$(find "$work/b/.claude/projects" -name '*.jsonl')
-[ -n "$restored" ] || fail "no transcript materialised"
+restored="$work/b/.claude/projects/$enc_b/cccccccc-0000-0000-0000-000000000000.jsonl"
+[ -f "$restored" ] || fail "no transcript materialised"
 grep -q 'complete record' "$restored" || fail "complete transcript missing"
 grep -q 'not a complete' "$restored" && fail "interrupted temporary file was synced"
 

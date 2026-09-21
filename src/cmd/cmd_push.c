@@ -37,8 +37,8 @@ int casi_cmd_push(int argc, char **argv)
     if ((rc = casi_ops_scan_local(&ctx, &local, &local_assets, &excluded)) != CASI_OK)
         goto done;
 
-    if ((rc = casi_store_write_tree(ctx.repo, ctx.provider->name, &local,
-                                    &local_assets, &tree)) != CASI_OK)
+    if ((rc = casi_store_write_tree(ctx.repo, ctx.provider->name, ctx.machine,
+                                    &local, &local_assets, &tree)) != CASI_OK)
         goto done;
 
     if ((rc = casi_ctx_local_ref(&ctx, &refname)) != CASI_OK)
@@ -57,6 +57,7 @@ int casi_cmd_push(int argc, char **argv)
                  local.len, local_assets.len, excluded);
 
     if (dry_run) {
+        casi_progress_done();
         if (unchanged)
             casi_info("nothing to push");
         else
@@ -79,6 +80,7 @@ int casi_cmd_push(int argc, char **argv)
     if ((rc = casi_repo_push(ctx.repo, casi_buf_cstr(&refname))) != CASI_OK)
         goto done;
 
+    casi_progress_done();
     if (unchanged)
         casi_info("already up to date");
     else

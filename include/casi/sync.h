@@ -30,4 +30,9 @@ int casi_sync_compare(casi_repo *repo, const casi_entry *local,
 
 const char *casi_sync_relation_name(casi_sync_relation relation);
 
+/* Number of leading chunk ids the two copies share. For an append-only
+ * divergence this is everything before the point where they fork; a rewind or
+ * compaction diverges from chunk zero. Cheap: compares OIDs, no I/O. */
+size_t casi_sync_common_prefix(const casi_entry *a, const casi_entry *b);
+
 #endif /* CASI_SYNC_H */

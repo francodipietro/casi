@@ -80,6 +80,10 @@ int  casi_fs_dirname(casi_buf *out, const char *path);
  * isatty() is a syscall, and on Windows becomes _isatty()/GetConsoleMode(). */
 bool casi_fs_stdout_is_tty(void);
 
+/* Whether stderr is a terminal -- where a self-overwriting progress line is
+ * meaningful. Progress stays silent when piped or redirected. */
+bool casi_fs_stderr_is_tty(void);
+
 /* A short, user-facing hostname; falls back to "unnamed" when unavailable. */
 int casi_fs_hostname(casi_buf *out);
 

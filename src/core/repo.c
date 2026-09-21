@@ -2,6 +2,7 @@
 #include "casi/repo.h"
 #include "casi/casi.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -732,11 +733,65 @@ static int certificate_cb(git_cert *cert, int valid, const char *host, void *pay
     return valid ? 0 : GIT_ECERTIFICATE;
 }
 
+static int fetch_progress_cb(const git_indexer_progress *stats, void *payload)
+{
+    (void)payload;
+
+    if (stats->total_objects > 0)
+        casi_progress("fetching objects: %u/%u (%zu KiB)",
+                      stats->received_objects, stats->total_objects,
+                      stats->received_bytes / 1024);
+    else
+        casi_progress("fetching objects: %u (%zu KiB)",
+                      stats->received_objects, stats->received_bytes / 1024);
+    return 0;
+}
+
+/* The remote (GitHub) streams its own progress over the sideband -- "Receiving
+ * objects: 12%", "Resolving deltas", etc. This is the only honest progress
+ * during an upload over SSH: libgit2's push_transfer_progress freezes at the
+ * last object it counted and is actively misleading. Show the server's words
+ * verbatim, stopping at the first newline/CR the server appends. */
+static int sideband_progress_cb(const char *str, int len, void *payload)
+{
+    int i;
+
+    (void)payload;
+
+    for (i = 0; i < len && str[i] != '\r' && str[i] != '\n'; i++)
+        ;
+    if (i > 0)
+        casi_progress("%.*s", i, str);
+    return 0;
+}
+
+static int pack_progress_cb(int stage, uint32_t current, uint32_t total, void *payload)
+{
+    (void)payload;
+
+    /* The pack is built locally; once it is complete the slow part -- the
+     * upload -- begins. Switch the label so the user knows what is happening
+     * even if the remote sends no sideband of its own. */
+    if (stage == 1 && total > 0 && current >= total) {
+        casi_progress("uploading...");
+    } else if (total > 0) {
+        casi_progress("packing objects (%s): %u/%u",
+                      stage == 0 ? "counting" : "compressing", current, total);
+    } else {
+        casi_progress("packing objects (%s): %u",
+                      stage == 0 ? "counting" : "compressing", current);
+    }
+    return 0;
+}
+
 static void init_callbacks(git_remote_callbacks *cb, struct ssh_auth *auth)
 {
     git_remote_init_callbacks(cb, GIT_REMOTE_CALLBACKS_VERSION);
     cb->credentials = credential_cb;
     cb->certificate_check = certificate_cb;
+    cb->sideband_progress = sideband_progress_cb;
+    cb->pack_progress = pack_progress_cb;
+    cb->transfer_progress = fetch_progress_cb;
     cb->payload = auth;
 }
 
@@ -772,6 +827,7 @@ int casi_repo_fetch(casi_repo *repo)
 
     git_remote_free(remote);
     ssh_auth_dispose(&auth);
+    casi_progress_done();
     return rc;
 }
 
@@ -813,6 +869,7 @@ out:
     casi_buf_dispose(&spec);
     git_remote_free(remote);
     ssh_auth_dispose(&auth);
+    casi_progress_done();
     return rc;
 }
 

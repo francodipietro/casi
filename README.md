@@ -33,6 +33,49 @@ Release assets are produced from version tags, with SHA-256 checksums and
 GitHub build provenance. The artifact layout, verification command, and the
 owner-controlled publication procedure are in [docs/RELEASING.md](docs/RELEASING.md).
 
+## Backup before syncing
+
+Before using casi with an existing Claude Code history, make a local backup on
+each machine. The included script works on macOS and Ubuntu and uses `rsync` to
+make complete, incremental snapshots: unchanged files are hard-linked to the
+previous snapshot (when the backup filesystem supports them), so a second run
+does not duplicate their contents. It never deletes an earlier snapshot
+automatically.
+
+Close Claude Code first for the most coherent result, then choose a backup
+volume or directory which is **not** `~/.claude` or inside it:
+
+```sh
+scripts/backup-claude.sh --destination /Volumes/Claude-backups   # macOS
+scripts/backup-claude.sh --destination /media/$USER/Claude-backups # Ubuntu
+```
+
+Ubuntu may need `sudo apt install rsync`. Snapshots live below
+`<destination>/casi-claude-backups/<machine>/snapshots/`; `latest` points at
+the most recent one. Re-run the exact command before a later casi session to
+renew the backup. The backup destination should be on a separate volume (and,
+ideally, backed up or encrypted itself): a local snapshot does not protect
+against loss of the laptop or disk.
+
+To restore, stop Claude Code and casi, first move the live directory somewhere
+safe, then copy one snapshot back. Start with the dry run and omit it only
+after checking the proposed changes:
+
+```sh
+mv ~/.claude ~/.claude.before-restore
+mkdir ~/.claude
+# macOS
+rsync -aE --dry-run /path/to/snapshots/<timestamp>/ ~/.claude/
+rsync -aE /path/to/snapshots/<timestamp>/ ~/.claude/
+
+# Ubuntu
+rsync -aAX --dry-run /path/to/snapshots/<timestamp>/ ~/.claude/
+rsync -aAX /path/to/snapshots/<timestamp>/ ~/.claude/
+```
+
+The moved `~/.claude.before-restore` directory lets you undo the restore
+without relying on the backup.
+
 ## Why not just rsync / Dropbox / a git repo of ~/.claude
 
 - **Sessions embed absolute paths.** `/home/franco/dev/app` on Linux is

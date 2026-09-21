@@ -5,15 +5,47 @@
 
 #include <string.h>
 
-static const char *local_root_path(const casi_ctx *ctx, const char *name)
+/* Discover only lists directories, it does not chunk anything, so it is cheap
+ * enough for a diagnostic. Projects are matched by basename automatically, so
+ * there is nothing for the user to declare; report what was found instead. */
+static int session_layout(const casi_ctx *ctx, size_t *sessions_out,
+                          size_t *projects_out)
 {
+    casi_session_list sessions;
+    casi_aux_file_list aux;
+    casi_strvec projects = CASI_STRVEC_INIT;
     size_t i;
+    int rc;
 
-    for (i = 0; i < casi_roots_count(ctx->roots); i++)
-        if (strcmp(casi_roots_name_at(ctx->roots, i), name) == 0)
-            return casi_roots_path_at(ctx->roots, i);
+    memset(&sessions, 0, sizeof(sessions));
+    memset(&aux, 0, sizeof(aux));
+    *sessions_out = 0;
+    *projects_out = 0;
 
-    return NULL;
+    if ((rc = ctx->provider->discover(ctx->roots, &sessions, &aux)) != CASI_OK)
+        goto done;
+    for (i = 0; i < sessions.len; i++) {
+        size_t j;
+        bool seen = false;
+
+        (*sessions_out)++;
+        for (j = 0; j < projects.len; j++)
+            if (strcmp(projects.items[j], sessions.items[i].project_path) == 0) {
+                seen = true;
+                break;
+            }
+        if (!seen &&
+            (rc = casi_strvec_push(&projects, sessions.items[i].project_path)) != CASI_OK)
+            goto done;
+    }
+    *projects_out = projects.len;
+    rc = CASI_OK;
+
+done:
+    casi_strvec_dispose(&projects);
+    casi_session_list_dispose(&sessions);
+    casi_aux_file_list_dispose(&aux);
+    return rc;
 }
 
 int casi_cmd_doctor(int argc, char **argv)
@@ -21,8 +53,8 @@ int casi_cmd_doctor(int argc, char **argv)
     casi_ctx ctx;
     casi_shared_config shared = { 0 };
     casi_buf backend = CASI_BUF_INIT, remote = CASI_BUF_INIT;
-    bool present, unmapped = false;
-    size_t i;
+    casi_strvec machines = CASI_STRVEC_INIT;
+    bool present;
     int rc;
 
     (void)argv;
@@ -43,54 +75,41 @@ int casi_cmd_doctor(int argc, char **argv)
 
     if ((rc = casi_repo_fetch(ctx.repo)) != CASI_OK)
         goto done;
-    casi_info("remote: reachable");
+    if ((rc = casi_repo_list_machines(ctx.repo, &machines)) != CASI_OK)
+        goto done;
+    if (machines.len == 0)
+        casi_info("remote: reachable (empty -- no machine has pushed yet)");
+    else
+        casi_info("remote: reachable (%zu machine branch(es))", machines.len);
 
-    if ((rc = casi_shared_config_load_remote(ctx.repo, &ctx.crypto, &shared, &present)) != CASI_OK)
+    if ((rc = casi_shared_config_load_remote(ctx.repo, &ctx.crypto, &shared,
+                                             &present)) != CASI_OK)
         goto done;
     if (!present) {
-        casi_info("roots: no shared configuration yet");
+        size_t total = 0, projects = 0;
+
+        if ((rc = session_layout(&ctx, &total, &projects)) != CASI_OK)
+            goto done;
+        if (total == 0)
+            casi_info("sessions: none found yet");
+        else
+            casi_info("sessions: %zu found across %zu project(s), "
+                      "matched by name automatically", total, projects);
+        casi_info("state: no shared configuration yet -- expected before "
+                  "your first `casi push`");
+        casi_info("next: `casi push`");
         rc = CASI_OK;
         goto done;
     }
 
-    if (shared.roots.len == 0)
-        casi_info("roots: no named roots declared");
-
-    for (i = 0; i < shared.roots.len; i++) {
-        const char *name = shared.roots.items[i];
-        const char *path = local_root_path(&ctx, name);
-        casi_stat st;
-
-        if (path == NULL) {
-            casi_warn("root \"%s\" is not mapped locally", name);
-            casi_info("  declare it with: casi config root.%s.path <local path>", name);
-            unmapped = true;
-            continue;
-        }
-
-        if ((rc = casi_fs_stat(path, &st)) != CASI_OK || !st.is_dir) {
-            if (rc == CASI_ENOTFOUND)
-                casi_error_clear();
-            else if (rc != CASI_OK)
-                goto done;
-            casi_warn("root \"%s\" maps to a missing directory: %s", name, path);
-            unmapped = true;
-            continue;
-        }
-
-        casi_info("root \"%s\": %s", name, path);
-    }
-
-    if (unmapped) {
-        casi_warn("some shared roots cannot be materialised on this machine");
-        rc = CASI_EUNMAPPED;
-    } else {
-        casi_info("roots: all shared roots are mapped");
-        rc = CASI_OK;
-    }
+    if (shared.exclude.len > 0)
+        casi_info("excluded projects: %zu", shared.exclude.len);
+    casi_info("state: ready -- next `casi push`");
+    rc = CASI_OK;
 
 done:
     casi_shared_config_dispose(&shared);
+    casi_strvec_dispose(&machines);
     casi_buf_dispose(&backend);
     casi_buf_dispose(&remote);
     casi_ctx_dispose(&ctx);

@@ -19,7 +19,6 @@ printf '{"type":"user","cwd":"%s","message":"keep me"}\n' "$work/a/src/p" > "$se
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" push >/dev/null || fail "initial push"
 "$casi" gc >/dev/null || fail "gc"
 git -C "$work/a/casi/repo.git" fsck --no-dangling >/dev/null || fail "gc left an invalid store"

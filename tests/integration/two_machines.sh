@@ -1,7 +1,7 @@
 #!/bin/sh
-# End-to-end: two isolated "machines" with DIFFERENT local layouts, one
-# git remote between them. Exercises the actual thing casi exists to do --
-# unit tests check the pieces, this checks they fit together.
+# End-to-end: two isolated "machines" with DIFFERENT local layouts, one git
+# remote between them. Projects match by basename automatically, so neither
+# machine declares a root.
 set -eu
 casi="$1"
 work="$2"
@@ -12,59 +12,54 @@ git init -q --bare "$work/remote.git"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# --- machine A: project under ~/src -----------------------------------
-mkdir -p "$work/a/src/myproj/.claude-marker" "$work/a/.claude"
-rm -rf "$work/a/src/myproj/.claude-marker"
+# --- machine A: project "myproj" under ~/src ---------------------------
+mkdir -p "$work/a/src/myproj" "$work/a/.claude"
 enc_a=$(echo "$work/a/src/myproj" | sed 's/[^a-zA-Z0-9]/-/g')
 mkdir -p "$work/a/.claude/projects/$enc_a"
 sess="$work/a/.claude/projects/$enc_a/11111111-2222-3333-4444-555555555555.jsonl"
 printf '{"type":"user","cwd":"%s","message":"see %s/main.c"}\n' \
     "$work/a/src/myproj" "$work/a/src/myproj" > "$sess"
+sed -i.bak "s#main.c#main.c and $work/a/notes.md#" "$sess"
+rm -f "$sess.bak"
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
-set +e
-out=$("$casi" init --machine 'bad name' 2>&1)
-rc=$?
-set -e
+set +e; out=$("$casi" init --machine 'bad name' 2>&1); rc=$?; set -e
 [ "$rc" = 2 ] || fail "invalid machine name: exit $rc, want 2"
 echo "$out" | grep -q 'invalid machine name' || fail "invalid machine name: missing error"
 echo "  ok   invalid machine name rejected during init"
 
-set +e
-out=$("$casi" init --machine config 2>&1)
-rc=$?
-set -e
+set +e; out=$("$casi" init --machine config 2>&1); rc=$?; set -e
 [ "$rc" = 2 ] || fail "reserved machine name: exit $rc, want 2"
 echo "$out" | grep -q 'reserved for shared configuration' ||
     fail "reserved machine name: missing error"
 echo "  ok   shared configuration branch is reserved"
 
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
-"$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" push >/dev/null || fail "push from A"
 echo "  ok   push from A"
 
-# --- machine B: SAME project, DIFFERENT local layout (~/code, not ~/src) --
+# --- machine B: SAME project, DIFFERENT layout (~/code), already in use -----
 mkdir -p "$work/b/code/myproj" "$work/b/.claude"
+enc_b=$(echo "$work/b/code/myproj" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$work/b/.claude/projects/$enc_b"
+# A local session registers the "myproj" basename -> B's own path.
+printf '{"type":"user","cwd":"%s","message":"B own session"}\n' \
+    "$work/b/code/myproj" \
+    > "$work/b/.claude/projects/$enc_b/99999999-0000-0000-0000-000000000000.jsonl"
+
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-b >/dev/null
-"$casi" config root.src.path "$work/b/code" >/dev/null
 "$casi" pull >/dev/null || fail "pull into B"
 
-got=$(find "$work/b/.claude/projects" -name '*.jsonl')
-[ -n "$got" ] || fail "no session materialised on B"
-
-# The directory name must be re-encoded for B's OWN layout, never A's.
-enc_b=$(echo "$work/b/code/myproj" | sed 's/[^a-zA-Z0-9]/-/g')
-case "$got" in
-    *"/$enc_b/"*) ;;
-    *) fail "session landed under the wrong directory: $got" ;;
-esac
+got="$work/b/.claude/projects/$enc_b/11111111-2222-3333-4444-555555555555.jsonl"
+[ -f "$got" ] || fail "no session materialised on B"
 
 # Both the cwd field AND the path embedded in message text must translate.
 grep -q "\"cwd\":\"$work/b/code/myproj\"" "$got" || fail "cwd was not translated"
 grep -q "$work/b/code/myproj/main.c" "$got" || fail "embedded path was not translated"
+grep -q "$work/b/notes.md" "$got" || fail "home path was not translated"
 grep -q "$work/a/src" "$got" && fail "machine A's path leaked into B's copy"
+grep -q "$work/a/notes.md" "$got" && fail "machine A's home path leaked into B's copy"
 echo "  ok   pull into B: layout re-encoded, cwd and embedded paths translated"
 
 # --- round-trip: B can continue A's session and A must accept that append ---

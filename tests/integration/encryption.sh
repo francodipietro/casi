@@ -25,7 +25,6 @@ export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude
 "$casi" init --remote "file://$work/remote.git" --machine machine-a --encrypt >/dev/null
 [ "$(stat -c %a "$CASI_HOME/crypto.key" 2>/dev/null || stat -f %Lp "$CASI_HOME/crypto.key")" = 600 ] ||
     fail "generated key is not private"
-"$casi" config root.src.path "$work/a/src" >/dev/null
 "$casi" push >/dev/null || fail "encrypted push from A"
 
 names=$(git -C "$work/remote.git" ls-tree -r --name-only refs/heads/casi/machine-a)
@@ -50,9 +49,12 @@ chmod 600 "$work/b/casi/crypto.key"
 export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-b --encrypt >/dev/null ||
     fail "encrypted init with copied key on B"
-"$casi" config root.src.path "$work/b/code" >/dev/null
-"$casi" pull >/dev/null || fail "encrypted pull into B"
+# A local session registers the "private-project" basename -> B's path.
 enc_b=$(echo "$work/b/code/private-project" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$work/b/.claude/projects/$enc_b"
+printf '{"cwd":"%s","message":"B own"}\n' "$work/b/code/private-project" \
+    > "$work/b/.claude/projects/$enc_b/bbbbbbbb-0000-0000-0000-000000000000.jsonl"
+"$casi" pull >/dev/null || fail "encrypted pull into B"
 base_b="$work/b/.claude/projects/$enc_b"
 [ -f "$base_b/$sid.jsonl" ] || fail "transcript was not materialised"
 [ -f "$base_b/$sid/subagents/agent-one.jsonl" ] || fail "sidecar was not materialised"
