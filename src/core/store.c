@@ -519,11 +519,41 @@ done:
     return rc;
 }
 
+/* Claude's file-history records are machine-local backup bookkeeping.  They
+ * change when a transcript is materialised on another host, even when no one
+ * changed the conversation.  They are deliberately omitted from the stored
+ * representation; the original local transcript is never rewritten here. */
+static int filter_volatile_history(const casi_buf *in, casi_buf *out)
+{
+    size_t start = 0, i;
+    casi_buf type = CASI_BUF_INIT;
+    int rc = CASI_OK;
+
+    casi_buf_clear(out);
+    for (i = 0; i <= in->len; i++) {
+        size_t len;
+
+        if (i != in->len && in->ptr[i] != '\n')
+            continue;
+        len = i - start;
+        if (!casi_json_find_string(in->ptr + start, len, "type", &type) ||
+            (strcmp(casi_buf_cstr(&type), "file-history-snapshot") != 0 &&
+             strcmp(casi_buf_cstr(&type), "file-history-delta") != 0)) {
+            if ((rc = casi_buf_put(out, in->ptr + start, len)) != CASI_OK ||
+                (i < in->len && (rc = casi_buf_putc(out, '\n')) != CASI_OK))
+                break;
+        }
+        start = i + 1;
+    }
+    casi_buf_dispose(&type);
+    return rc;
+}
+
 static int scan_one_session(casi_repo *repo, const casi_roots *roots,
                             casi_index *index, const char *provider_name,
                             const casi_session *session, casi_entry_list *out)
 {
-    casi_buf raw = CASI_BUF_INIT, normalized = CASI_BUF_INIT;
+    casi_buf raw = CASI_BUF_INIT, filtered = CASI_BUF_INIT, normalized = CASI_BUF_INIT;
     struct chunk_writer writer;
     const casi_index_entry *cached;
     casi_stat before, after;
@@ -553,7 +583,8 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
         goto done;
     }
 
-    resume = casi_index_entry_can_resume(cached, &before) && cache_entry_is_valid(repo, cached);
+    /* Filtering whole JSONL records invalidates raw-to-normalized offsets. */
+    resume = false;
     if (resume)
         rc = casi_fs_read_file_from(session->local_path, cached->tail_raw_offset, &raw);
     else
@@ -563,8 +594,9 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
 
     /* Normalise first, chunk second: this ordering is what makes two machines
      * with different layouts produce identical blobs. */
-    if ((rc = casi_roots_normalize_session_text(roots, session->project_path,
-                                                &raw, &normalized)) != CASI_OK)
+    if ((rc = filter_volatile_history(&raw, &filtered)) != CASI_OK ||
+        (rc = casi_roots_normalize_session_text(roots, session->project_path,
+                                                &filtered, &normalized)) != CASI_OK)
         goto done;
     if (resume) {
         bool tail_matches;
@@ -639,6 +671,7 @@ done:
     free(chunks);
     free(writer.oids);
     casi_buf_dispose(&raw);
+    casi_buf_dispose(&filtered);
     casi_buf_dispose(&normalized);
     return rc;
 }
