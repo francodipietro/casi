@@ -10,7 +10,7 @@
 /* This is a private, local cache format.  Changing it invalidates safely. */
 /* IDX4: automatic roots are now scoped to the session being scanned. Cached
  * chunk OIDs made with the old global-root rule are not interchangeable. */
-#define CASI_INDEX_MAGIC "CASIIDX4"
+#define CASI_INDEX_MAGIC "CASIIDX5"
 #define CASI_INDEX_MAGIC_LEN (sizeof(CASI_INDEX_MAGIC) - 1)
 #define CASI_INDEX_CHECKSUM_LEN GIT_OID_RAWSZ
 
