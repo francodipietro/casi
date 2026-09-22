@@ -27,12 +27,12 @@ echo "$out" | grep -q 'cannot be empty' || fail "empty foreign home: missing err
 enc=$(echo "$work/home/src/p" | sed 's/[^a-zA-Z0-9]/-/g')
 mkdir -p "$work/home/.claude/projects/$enc"
 f="$work/home/.claude/projects/$enc/11111111-0000-0000-0000-000000000000.jsonl"
-printf '{"cwd":"%s","message":"see %s/a.txt and %s/b.txt"}\n' \
+printf '{"cwd":"%s","message":"see %s/a.txt, %s/b.txt -type f"}\n' \
     "$work/home/src/p" "$work/foreign" "$work/foreign" > "$f"
 
 "$casi" migrate "$work/foreign" >/dev/null
 
-grep -q "see $work/home/a.txt and $work/home/b.txt" "$f" \
+grep -q "see $work/home/a.txt, $work/home/b.txt -type f" "$f" \
     || fail "foreign home was not rewritten to the local home"
 grep -q "$work/foreign" "$f" && fail "foreign home leaked into the transcript"
 
