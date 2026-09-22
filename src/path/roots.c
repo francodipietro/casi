@@ -12,6 +12,7 @@ struct root_entry {
     char  *name;
     char  *path;
     size_t path_len;
+    bool   automatic;
 };
 
 struct casi_roots {
@@ -99,7 +100,8 @@ bool casi_root_name_is_valid(const char *name)
     return true;
 }
 
-int casi_roots_add(casi_roots *roots, const char *name, const char *local_path)
+static int roots_add(casi_roots *roots, const char *name, const char *local_path,
+                     bool automatic)
 {
     struct root_entry entry;
     size_t i;
@@ -122,6 +124,9 @@ int casi_roots_add(casi_roots *roots, const char *name, const char *local_path)
             free(roots->items[i].path);
             roots->items[i].path = dup;
             roots->items[i].path_len = strlen(dup);
+            /* An explicit root must stay explicit if an auto-discovered
+             * project happens to use its name. */
+            roots->items[i].automatic = roots->items[i].automatic && automatic;
             sort_by_path_len_desc(roots);
             rebuild_first_byte_index(roots);
             return CASI_OK;
@@ -146,11 +151,17 @@ int casi_roots_add(casi_roots *roots, const char *name, const char *local_path)
         return CASI_ENOMEM;
     }
     entry.path_len = strlen(entry.path);
+    entry.automatic = automatic;
 
     roots->items[roots->len++] = entry;
     sort_by_path_len_desc(roots);
     rebuild_first_byte_index(roots);
     return CASI_OK;
+}
+
+int casi_roots_add(casi_roots *roots, const char *name, const char *local_path)
+{
+    return roots_add(roots, name, local_path, false);
 }
 
 struct load_ctx {
@@ -218,6 +229,11 @@ const char *casi_roots_path_at(const casi_roots *roots, size_t i)
     return i < roots->len ? roots->items[i].path : NULL;
 }
 
+bool casi_roots_is_automatic_at(const casi_roots *roots, size_t i)
+{
+    return i < roots->len && roots->items[i].automatic;
+}
+
 /*
  * Whether a byte could extend the final component of a path. Used to reject
  * "/a/src" matching inside "/a/srcfoo", which is a different directory.
@@ -270,7 +286,8 @@ static int root_matches_at(const struct root_entry *entry,
 
 static const struct root_entry *find_match(const casi_roots *roots,
                                            const char *text, size_t text_len,
-                                           enum match_mode mode)
+                                           enum match_mode mode,
+                                           const char *automatic_name)
 {
     size_t i;
 
@@ -279,7 +296,9 @@ static const struct root_entry *find_match(const casi_roots *roots,
 
     /* Table is sorted longest-first, so the first hit is the longest. */
     for (i = 0; i < roots->len; i++)
-        if (root_matches_at(&roots->items[i], text, text_len, mode))
+        if ((!roots->items[i].automatic || automatic_name == NULL ||
+             strcmp(roots->items[i].name, automatic_name) == 0) &&
+            root_matches_at(&roots->items[i], text, text_len, mode))
             return &roots->items[i];
 
     return NULL;
@@ -288,7 +307,7 @@ static const struct root_entry *find_match(const casi_roots *roots,
 int casi_roots_normalize_path(const casi_roots *roots, const char *local, casi_buf *out)
 {
     size_t len = strlen(local);
-    const struct root_entry *match = find_match(roots, local, len, CASI_MATCH_PATH);
+    const struct root_entry *match = find_match(roots, local, len, CASI_MATCH_PATH, NULL);
     int rc;
 
     casi_buf_clear(out);
@@ -386,7 +405,7 @@ int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_b
         goto done;
     }
 
-    if ((rc = casi_roots_add(roots, casi_buf_cstr(&name), local)) == CASI_OK)
+    if ((rc = roots_add(roots, casi_buf_cstr(&name), local, true)) == CASI_OK)
         rc = casi_roots_normalize_path(roots, local, out);
 
 done:
@@ -440,7 +459,8 @@ int casi_roots_denormalize_path(const casi_roots *roots, const char *canonical,
     return casi_buf_puts(out, canonical + prefix_len);
 }
 
-int casi_roots_normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf *out)
+static int normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf *out,
+                          const char *automatic_name)
 {
     const char *p = in->ptr != NULL ? in->ptr : "";
     size_t len = in->len, i = 0, span_start = 0;
@@ -459,7 +479,7 @@ int casi_roots_normalize_text(const casi_roots *roots, const casi_buf *in, casi_
             continue;
         }
 
-        match = find_match(roots, p + i, len - i, CASI_MATCH_TEXT);
+        match = find_match(roots, p + i, len - i, CASI_MATCH_TEXT, automatic_name);
         if (match == NULL) {
             i++;
             continue;
@@ -476,6 +496,31 @@ int casi_roots_normalize_text(const casi_roots *roots, const casi_buf *in, casi_
     }
 
     return casi_buf_put(out, p + span_start, len - span_start);
+}
+
+int casi_roots_normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf *out)
+{
+    return normalize_text(roots, in, out, NULL);
+}
+
+int casi_roots_normalize_session_text(const casi_roots *roots, const char *project_path,
+                                      const casi_buf *in, casi_buf *out)
+{
+    static const char scheme[] = CASI_CANONICAL_SCHEME;
+    const char *name, *slash;
+    char *automatic_name;
+    int rc;
+
+    if (!casi_str_has_prefix(project_path, scheme))
+        return casi_error_set(CASI_EINVAL, "project path is not canonical: %s", project_path);
+    name = project_path + sizeof(scheme) - 1;
+    slash = strchr(name, '/');
+    automatic_name = casi_strndup(name, slash != NULL ? (size_t)(slash - name) : strlen(name));
+    if (automatic_name == NULL)
+        return casi_error_set(CASI_ENOMEM, "out of memory selecting project root");
+    rc = normalize_text(roots, in, out, automatic_name);
+    free(automatic_name);
+    return rc;
 }
 
 int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,

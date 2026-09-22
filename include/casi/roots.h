@@ -44,6 +44,7 @@ int  casi_roots_load(casi_roots *roots, casi_config *cfg);
 size_t      casi_roots_count(const casi_roots *roots);
 const char *casi_roots_name_at(const casi_roots *roots, size_t i);
 const char *casi_roots_path_at(const casi_roots *roots, size_t i);
+bool        casi_roots_is_automatic_at(const casi_roots *roots, size_t i);
 
 /*
  * Translate a single path. normalize() maps a local path to canonical form;
@@ -77,7 +78,12 @@ int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_b
  * `casi config root.<name>.path` line is missing.
  */
 int casi_roots_normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf *out);
+/* As above, but automatic project roots other than `project_path` are ignored.
+ * Discovery is machine-local, so letting an unrelated discovered project
+ * rewrite a transcript would make its stored form depend on that inventory. */
+int casi_roots_normalize_session_text(const casi_roots *roots, const char *project_path,
+                                      const casi_buf *in, casi_buf *out);
 int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
-                                casi_buf *out, casi_buf *unmapped_out);
+                                 casi_buf *out, casi_buf *unmapped_out);
 
 #endif /* CASI_ROOTS_H */

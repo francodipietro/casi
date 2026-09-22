@@ -563,7 +563,8 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
 
     /* Normalise first, chunk second: this ordering is what makes two machines
      * with different layouts produce identical blobs. */
-    if ((rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
+    if ((rc = casi_roots_normalize_session_text(roots, session->project_path,
+                                                &raw, &normalized)) != CASI_OK)
         goto done;
     if (resume) {
         bool tail_matches;
@@ -577,7 +578,8 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
             casi_buf_clear(&raw);
             casi_buf_clear(&normalized);
             if ((rc = casi_fs_read_file(session->local_path, &raw)) != CASI_OK ||
-                (rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
+                (rc = casi_roots_normalize_session_text(roots, session->project_path,
+                                                        &raw, &normalized)) != CASI_OK)
                 goto done;
         }
     }
@@ -651,7 +653,8 @@ static int scan_one_asset(casi_repo *repo, const casi_roots *roots,
     memset(&asset, 0, sizeof(asset));
     if ((rc = casi_fs_read_file(file->local_path, &raw)) != CASI_OK)
         goto done;
-    if ((rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
+    if ((rc = casi_roots_normalize_session_text(roots, file->project_path,
+                                                &raw, &normalized)) != CASI_OK)
         goto done;
     if (casi_repo_crypto_enabled(repo)) {
         if ((rc = asset_wrap(file, &normalized, &wrapped)) != CASI_OK)
