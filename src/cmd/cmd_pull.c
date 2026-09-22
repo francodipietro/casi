@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 #include "cmd/cmd.h"
 #include "cmd/sync_ops.h"
+#include "casi/index.h"
 #include "casi/jsonl.h"
 
 #include <inttypes.h>
@@ -214,6 +215,7 @@ int casi_cmd_pull(int argc, char **argv)
     const char *take_theirs = NULL;
     bool dry_run = false;
     bool theirs_all = false;
+    bool materialized = false;
     size_t pulled = 0, assets_pulled = 0, conflicts = 0, asset_conflicts = 0, i;
     int rc;
 
@@ -300,6 +302,7 @@ int casi_cmd_pull(int argc, char **argv)
             goto done;
 
         casi_verbose("updated %s", r->session_id);
+        materialized = true;
         pulled++;
     }
 
@@ -342,6 +345,7 @@ int casi_cmd_pull(int argc, char **argv)
                         goto done;
                 }
                 assets_pulled++;
+                materialized = true;
                 continue;
             }
             report_asset_conflict(remote_asset);
@@ -378,8 +382,12 @@ int casi_cmd_pull(int argc, char **argv)
         if (rc != CASI_OK)
             goto done;
         casi_verbose("updated auxiliary file %s", remote_asset->name);
+        materialized = true;
         assets_pulled++;
     }
+
+    if (materialized && !dry_run && (rc = casi_index_invalidate()) != CASI_OK)
+        goto done;
 
     casi_progress_done();
     casi_info("%s %zu session(s)", dry_run ? "would update" : "updated", pulled);

@@ -474,3 +474,14 @@ done:
     casi_buf_dispose(&raw);
     return rc;
 }
+
+int casi_index_invalidate(void)
+{
+    int rc = casi_fs_remove_file(casi_paths_index());
+
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        return CASI_OK;
+    }
+    return rc;
+}
