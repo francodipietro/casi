@@ -18,7 +18,7 @@ rebases. There are five commands:
 casi init --remote <url>   # point it at any git remote you control
 casi push                  # send this machine's sessions
 casi pull                  # bring in the other machines'
-casi sync                  # pull, then push — the everyday command
+casi sync                  # pull, resolve safely, then push
 casi status                # what is out of date, and where
 ```
 
@@ -76,6 +76,46 @@ rsync -aAX /path/to/snapshots/<timestamp>/ ~/.claude/
 The moved `~/.claude.before-restore` directory lets you undo the restore
 without relying on the backup.
 
+## Finding projects on another machine
+
+casi identifies a project from the first `cwd` in its transcript and uses the
+final directory name as its portable name. When the other machine has already
+used that project in Claude Code, its local transcript supplies the destination
+path automatically. If it has a checkout but no Claude Code history, casi
+searches common code locations under that machine's home directory for a
+unique matching project directory. Neither case needs a configured path, alias, matching username, or
+matching parent-directory layout.
+
+If there is no matching directory, or there are two with the same name, casi
+does not guess and does not write the incoming session. The remote copy remains
+available; moving into or creating the intended checkout and retrying is safe.
+Manual `root.<name>.path` settings remain an escape hatch for genuinely
+ambiguous names, not part of normal setup.
+
+Older remote branches may contain paths normalized by a previous casi version.
+`casi` migrates known historical layouts while materialising them, without
+adding aliases or storing a machine-specific path in shared state.
+
+## Automatic conflict handling
+
+The normal `casi sync` path converges automatically. Equivalent copies and
+append-only continuations are merged as usual. For a genuine session fork,
+casi compares the last internal JSONL event timestamp and keeps the newest
+activity; the other copy is archived under Casi's data directory. Subagent
+files follow their parent session's choice, so one conversation never receives
+a mixture of both branches. Files without a parent session or event timestamp,
+such as project memory, use a deterministic object-id tie-breaker so every
+machine makes the same choice. Nothing is deleted, and a repeat sync reuses the
+same archived copy rather than adding numbered duplicates.
+
+Use `casi conflicts` to inspect archived copies. `casi pull --strict` or
+`casi sync --strict` disables automatic selection and leaves a genuine fork
+pending, which is useful when deliberately comparing two conversations.
+
+`casi pull --dry-run` is a read-only preview: it does not fetch, write a
+session, archive a copy, update Casi's object store, or refresh its cache. It
+reports the choices it would make from the last fetched remote view.
+
 ## Why not just rsync / Dropbox / a git repo of ~/.claude
 
 - **Sessions embed absolute paths.** `/home/franco/dev/app` on Linux is
@@ -86,9 +126,9 @@ without relying on the backup.
 - **Session files are append-only and can be enormous** — a long-running one
   reaches hundreds of megabytes. casi slices them at line boundaries so a push
   after an hour of work transfers the tail, not the file.
-- **The same session can grow on two machines.** casi detects that as a real
-  conflict instead of silently letting one overwrite the other, and it never
-  destroys either copy.
+- **The same session can grow on two machines.** casi keeps the newest recorded
+  activity by default and archives the other complete copy; strict mode leaves
+  it pending instead. Neither copy is destroyed.
 - **No always-on network required.** Any git remote works as the hub: GitHub,
   GitLab, Bitbucket, self-hosted Gitea/Forgejo, a bare repo over plain SSH, or a
   path on a USB stick. The machines never have to be online at the same time.

@@ -21,7 +21,22 @@ int casi_ops_scan_local(casi_ctx *ctx, casi_entry_list *out,
     return rc;
 }
 
-static int merge_assets(casi_asset_list *into, casi_asset_list *from)
+int casi_ops_scan_local_read_only(casi_ctx *ctx, casi_entry_list *out,
+                                  casi_asset_list *assets_out, size_t *excluded_out)
+{
+    casi_strvec exclude = CASI_STRVEC_INIT;
+    int rc;
+
+    if ((rc = casi_ctx_exclude_list(ctx, &exclude)) == CASI_OK)
+        rc = casi_store_scan_local_read_only(ctx->repo, ctx->roots, ctx->provider,
+                                             &exclude, out, assets_out, excluded_out);
+
+    casi_strvec_dispose(&exclude);
+    return rc;
+}
+
+static int merge_assets(casi_repo *repo, const casi_roots *roots,
+                        casi_asset_list *into, casi_asset_list *from)
 {
     size_t i;
     int rc;
@@ -45,7 +60,11 @@ static int merge_assets(casi_asset_list *into, casi_asset_list *from)
         /* Auxiliary files have no safe append rule. Never choose one of two
          * different remote versions arbitrarily: pull will keep the local
          * file and report the conflict explicitly instead. */
-        if (!git_oid_equal(&have->oid, &incoming->oid)) {
+        bool equal;
+
+        if ((rc = casi_store_asset_equal(repo, roots, have, incoming, &equal)) != CASI_OK)
+            return rc;
+        if (!equal) {
             if (incoming->session_id != NULL) {
                 casi_warn("auxiliary file has conflicting remote versions: project %s, "
                           "session %s, subagent %s", incoming->project_path,
@@ -67,7 +86,8 @@ static int merge_assets(casi_asset_list *into, casi_asset_list *from)
 }
 
 /* Folds one machine's entries into the accumulating union. */
-static int merge_branch(casi_repo *repo, casi_entry_list *into, casi_entry_list *from)
+static int merge_branch(casi_repo *repo, const casi_roots *roots,
+                        casi_entry_list *into, casi_entry_list *from)
 {
     size_t i;
     int rc;
@@ -91,7 +111,7 @@ static int merge_branch(casi_repo *repo, casi_entry_list *into, casi_entry_list 
          * local surface it as a conflict. */
         casi_sync_relation relation;
 
-        if ((rc = casi_sync_compare(repo, incoming, have, &relation)) != CASI_OK)
+        if ((rc = casi_sync_compare(repo, roots, incoming, have, &relation)) != CASI_OK)
             return rc;
         if (relation == CASI_SYNC_LOCAL_AHEAD) {
             casi_entry moved = *incoming;
@@ -109,6 +129,7 @@ int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out,
                           casi_asset_list *assets_out)
 {
     casi_strvec machines = CASI_STRVEC_INIT;
+    casi_strvec searched_projects = CASI_STRVEC_INIT;
     casi_buf refname = CASI_BUF_INIT;
     size_t i, j;
     int rc;
@@ -157,9 +178,35 @@ int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out,
             }
         }
 
-        rc = merge_branch(ctx->repo, out, &branch);
+        /* Discover destinations before comparing two remote branches: legacy
+         * auxiliary blobs may be identical only after translating paths. */
+        for (j = 0; j < branch.len + branch_assets.len; j++) {
+            const char *project = j < branch.len
+                                ? branch.items[j].project_path
+                                : branch_assets.items[j - branch.len].project_path;
+            bool seen = false;
+            size_t k;
+
+            for (k = 0; k < searched_projects.len; k++)
+                if (strcmp(searched_projects.items[k], project) == 0) {
+                    seen = true;
+                    break;
+                }
+            if (seen)
+                continue;
+            if ((rc = casi_strvec_push(&searched_projects, project)) != CASI_OK ||
+                (rc = casi_roots_discover_project(ctx->roots, project)) != CASI_OK)
+                break;
+        }
+        if (rc != CASI_OK) {
+            casi_entry_list_dispose(&branch);
+            casi_asset_list_dispose(&branch_assets);
+            goto done;
+        }
+
+        rc = merge_branch(ctx->repo, ctx->roots, out, &branch);
         if (rc == CASI_OK)
-            rc = merge_assets(assets_out, &branch_assets);
+            rc = merge_assets(ctx->repo, ctx->roots, assets_out, &branch_assets);
         casi_entry_list_dispose(&branch);
         casi_asset_list_dispose(&branch_assets);
 
@@ -171,11 +218,13 @@ int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out,
 
 done:
     casi_strvec_dispose(&machines);
+    casi_strvec_dispose(&searched_projects);
     casi_buf_dispose(&refname);
     return rc;
 }
 
-int casi_ops_summarise(casi_repo *repo, casi_entry_list *local,
+int casi_ops_summarise(casi_repo *repo, const casi_roots *roots,
+                       casi_entry_list *local,
                        casi_entry_list *remote, casi_asset_list *local_assets,
                        casi_asset_list *remote_assets, casi_sync_summary *out)
 {
@@ -196,7 +245,7 @@ int casi_ops_summarise(casi_repo *repo, casi_entry_list *local,
 
         casi_sync_relation relation;
 
-        if ((rc = casi_sync_compare(repo, l, r, &relation)) != CASI_OK)
+        if ((rc = casi_sync_compare(repo, roots, l, r, &relation)) != CASI_OK)
             return rc;
 
         switch (relation) {
@@ -234,8 +283,14 @@ int casi_ops_summarise(casi_repo *repo, casi_entry_list *local,
         if (remote_asset == NULL) {
             out->auxiliary_to_push++;
             out->auxiliary_push_bytes += local_asset->bytes;
-        } else if (!git_oid_equal(&local_asset->oid, &remote_asset->oid)) {
-            out->auxiliary_conflicts++;
+        } else {
+            bool equal;
+
+            if ((rc = casi_store_asset_equal(repo, roots, local_asset,
+                                             remote_asset, &equal)) != CASI_OK)
+                return rc;
+            if (!equal)
+                out->auxiliary_conflicts++;
         }
     }
     for (i = 0; i < remote_assets->len; i++) {
@@ -284,7 +339,8 @@ void casi_conflict_list_dispose(casi_conflict_list *list)
     memset(list, 0, sizeof(*list));
 }
 
-int casi_ops_list_conflicts(casi_repo *repo, casi_entry_list *local,
+int casi_ops_list_conflicts(casi_repo *repo, const casi_roots *roots,
+                            casi_entry_list *local,
                             casi_entry_list *remote, casi_conflict_list *out)
 {
     size_t i;
@@ -299,7 +355,7 @@ int casi_ops_list_conflicts(casi_repo *repo, casi_entry_list *local,
 
         if (r == NULL)
             continue;
-        if ((rc = casi_sync_compare(repo, l, r, &relation)) != CASI_OK)
+        if ((rc = casi_sync_compare(repo, roots, l, r, &relation)) != CASI_OK)
             return rc;
         if (relation != CASI_SYNC_DIVERGED)
             continue;

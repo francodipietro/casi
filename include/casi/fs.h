@@ -45,12 +45,17 @@ int  casi_fs_read_file_from(const char *path, uint64_t offset, casi_buf *out);
  * fields casi reads to identify one live in the first record, so scanning a
  * session should never mean reading all of it. */
 int  casi_fs_read_file_prefix(const char *path, size_t max, casi_buf *out);
+/* Compare a file with in-memory bytes in bounded blocks. A missing file is
+ * reported as unequal, not as an error. */
+int  casi_fs_file_equals_buffer(const char *path, const void *data, size_t len,
+                                bool *equal_out);
 /* Resolves `path` to an absolute, symlink-free path in `out`. */
 int  casi_fs_realpath(const char *path, casi_buf *out);
 
 /*
- * Writes via a sibling temp file plus an atomic replace, so an interrupted
- * casi never leaves a half-written session on disk. Creates parent dirs.
+ * Writes via a sibling temp file plus an atomic, durable replace, so an
+ * interrupted casi never leaves a half-written session on disk. Creates
+ * parent dirs.
  */
 int  casi_fs_write_file_atomic(const char *path, const void *data, size_t len);
 /* Same atomic replacement, but the resulting file is readable only by its
@@ -62,6 +67,9 @@ int  casi_fs_rename_replace(const char *from, const char *to);
 /* Creates a symbolic link at `path` pointing to `target`. */
 int  casi_fs_symlink(const char *target, const char *path);
 int  casi_fs_remove_file(const char *path);
+/* Removes a file or directory tree without following symlinks. Internal
+ * callers use this only for a freshly-created temporary directory. */
+int  casi_fs_remove_tree(const char *path);
 
 /* Runs `git -C <bare-repo> gc --prune=now` without invoking a shell. This is
  * kept here with the other process/filesystem boundary for the eventual

@@ -17,6 +17,11 @@ documentation.
 Read this whole file before touching git or writing code. Section 2 in
 particular describes a real risk to the actual work product.
 
+> **Usability handoff (2026-09-20):** Before proposing more sync work, also
+> read [docs/USABILITY_HANDOFF.md](docs/USABILITY_HANDOFF.md). It records the
+> first real owner onboarding attempt, its confirmed state, and the product
+> blockers that currently make casi unsuitable for the owner's daily use.
+
 ## 1. What casi is
 
 A CLI, in C, that syncs coding-assistant sessions (Claude Code first) between

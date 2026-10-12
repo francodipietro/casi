@@ -81,7 +81,7 @@ first_warn=$(echo "$out" | grep -n '^warning:' | head -1 | cut -d: -f1)
 [ "$first_info" -lt "$first_warn" ] || fail "status: warning printed before the report (stdout buffering regression)"
 echo "  ok   status: conflict reported, in program order"
 
-set +e; out=$("$casi" pull 2>&1); rc=$?; set -e
+set +e; out=$("$casi" pull --strict 2>&1); rc=$?; set -e
 [ "$rc" = 3 ] || fail "pull with a real divergence: exit $rc, want 3"
 echo "$out" | grep -qi 'unknown error' && fail "pull: leaked the 'unknown error' placeholder"
 echo "$out" | grep -q 'remote (machine-a)' || fail "pull: conflict missing origin machine"
@@ -94,6 +94,22 @@ parked=$(find "$work/b/casi/conflicts" -name '*-remote*.jsonl' 2>/dev/null | hea
 [ -n "$parked" ] || fail "pull: no conflicting copy was parked"
 grep -q 'edited on A' "$parked" || fail "parked copy does not contain the remote content"
 echo "  ok   pull: remote copy parked at $parked"
+
+set +e; "$casi" pull --strict >/dev/null 2>&1; rc=$?; set -e
+[ "$rc" = 3 ] || fail "repeat pull: exit $rc, want 3"
+[ "$(find "$work/b/casi/conflicts" -name '*-remote*.jsonl' | wc -l)" -eq 1 ] ||
+    fail "repeat pull created a duplicate parked copy"
+echo "  ok   repeat pull reuses the same parked copy"
+
+export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
+printf '{"type":"user","cwd":"%s","message":"A second edit"}\n' "$work/a/src/p" >> "$sess_a"
+"$casi" push >/dev/null
+export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
+set +e; "$casi" pull --strict >/dev/null 2>&1; rc=$?; set -e
+[ "$rc" = 3 ] || fail "new remote edit: exit $rc, want 3"
+[ "$(find "$work/b/casi/conflicts" -name '*-remote*.jsonl' | wc -l)" -eq 2 ] ||
+    fail "a changed remote copy was not parked separately"
+echo "  ok   a new remote revision gets its own parked copy"
 
 out=$("$casi" conflicts) || fail "conflicts command"
 echo "$out" | grep -q 'casi://p' || fail "conflicts: parked copy missing project"

@@ -10,6 +10,52 @@
 
 #define CASI_CRYPTO_MAGIC "CASIENC1"
 #define CASI_CRYPTO_MAGIC_LEN (sizeof(CASI_CRYPTO_MAGIC) - 1)
+#define CASI_RECOVERY_MAGIC "CASIREC1"
+#define CASI_RECOVERY_MAGIC_LEN (sizeof(CASI_RECOVERY_MAGIC) - 1)
+
+int casi_crypto_recovery_wrap(const unsigned char key[CASI_CRYPTO_KEY_BYTES], const char *passphrase, casi_buf *out)
+{
+    unsigned char salt[crypto_pwhash_SALTBYTES], derived[crypto_aead_xchacha20poly1305_ietf_KEYBYTES], nonce[crypto_aead_xchacha20poly1305_ietf_NPUBBYTES];
+    unsigned long long n; int rc;
+    if (key == NULL || passphrase == NULL || passphrase[0] == '\0') return casi_error_set(CASI_EINVAL, "recovery passphrase cannot be empty");
+    randombytes_buf(salt, sizeof(salt)); randombytes_buf(nonce, sizeof(nonce));
+    if (crypto_pwhash(derived, sizeof(derived), passphrase, strlen(passphrase), salt, crypto_pwhash_OPSLIMIT_MODERATE, crypto_pwhash_MEMLIMIT_MODERATE, crypto_pwhash_ALG_ARGON2ID13) != 0) return casi_error_set(CASI_ENOMEM, "not enough memory to derive recovery key");
+    casi_buf_clear(out);
+    if ((rc = casi_buf_put(out, CASI_RECOVERY_MAGIC, CASI_RECOVERY_MAGIC_LEN)) != CASI_OK || (rc = casi_buf_put(out, salt, sizeof(salt))) != CASI_OK || (rc = casi_buf_put(out, nonce, sizeof(nonce))) != CASI_OK || (rc = casi_buf_grow(out, CASI_CRYPTO_KEY_BYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES)) != CASI_OK) goto done;
+    if (crypto_aead_xchacha20poly1305_ietf_encrypt((unsigned char *)out->ptr + out->len, &n, key, CASI_CRYPTO_KEY_BYTES, (const unsigned char *)CASI_RECOVERY_MAGIC, CASI_RECOVERY_MAGIC_LEN, NULL, nonce, derived) != 0) rc = casi_error_set(CASI_ERROR, "cannot encrypt recovery key"); else { out->len += (size_t)n; out->ptr[out->len] = '\0'; rc = CASI_OK; }
+done: sodium_memzero(derived, sizeof(derived)); sodium_memzero(nonce, sizeof(nonce)); return rc;
+}
+
+int casi_crypto_recovery_unwrap(const casi_buf *envelope, const char *passphrase,
+                                unsigned char key_out[CASI_CRYPTO_KEY_BYTES])
+{
+    const unsigned char *p;
+    unsigned char derived[crypto_aead_xchacha20poly1305_ietf_KEYBYTES];
+    unsigned long long n;
+    const size_t header = CASI_RECOVERY_MAGIC_LEN + crypto_pwhash_SALTBYTES +
+                          crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+    int rc = CASI_OK;
+
+    if (envelope == NULL || passphrase == NULL || key_out == NULL || passphrase[0] == '\0' ||
+        envelope->len != header + CASI_CRYPTO_KEY_BYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES ||
+        memcmp(envelope->ptr, CASI_RECOVERY_MAGIC, CASI_RECOVERY_MAGIC_LEN) != 0)
+        return casi_error_set(CASI_EINVAL, "invalid recovery envelope");
+    p = (const unsigned char *)envelope->ptr;
+    if (crypto_pwhash(derived, sizeof(derived), passphrase, strlen(passphrase),
+                      p + CASI_RECOVERY_MAGIC_LEN, crypto_pwhash_OPSLIMIT_MODERATE,
+                      crypto_pwhash_MEMLIMIT_MODERATE, crypto_pwhash_ALG_ARGON2ID13) != 0)
+        return casi_error_set(CASI_ENOMEM, "not enough memory to derive recovery key");
+    if (crypto_aead_xchacha20poly1305_ietf_decrypt(key_out, &n, NULL,
+            p + header, envelope->len - header,
+            (const unsigned char *)CASI_RECOVERY_MAGIC, CASI_RECOVERY_MAGIC_LEN,
+            p + CASI_RECOVERY_MAGIC_LEN + crypto_pwhash_SALTBYTES, derived) != 0 ||
+        n != CASI_CRYPTO_KEY_BYTES) {
+        sodium_memzero(key_out, CASI_CRYPTO_KEY_BYTES);
+        rc = casi_error_set(CASI_EINVAL, "recovery passphrase is incorrect");
+    }
+    sodium_memzero(derived, sizeof(derived));
+    return rc;
+}
 
 static int derive_key(unsigned char out[CASI_CRYPTO_KEY_BYTES],
                       const unsigned char master[CASI_CRYPTO_KEY_BYTES],

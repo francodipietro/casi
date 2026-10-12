@@ -46,6 +46,9 @@ int casi_cmd_config(int argc, char **argv)
     if (strcmp(argv[0], "--list") == 0 || strcmp(argv[0], "-l") == 0) {
         rc = (argc == 1) ? config_list(cfg)
                          : casi_error_set(CASI_EINVAL, "--list takes no arguments");
+    } else if (strcmp(argv[0], "--add") == 0) {
+        rc = (argc == 3) ? casi_config_add_multivar(cfg, argv[1], argv[2])
+                         : casi_error_set(CASI_EINVAL, "--add takes a key and a value");
     } else if (strcmp(argv[0], "--unset") == 0) {
         rc = (argc == 2) ? casi_config_unset(cfg, argv[1])
                          : casi_error_set(CASI_EINVAL, "--unset takes exactly one key");

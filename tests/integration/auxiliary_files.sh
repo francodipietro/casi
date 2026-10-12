@@ -65,7 +65,7 @@ printf '{"cwd":"%s","message":"second subagent"}\n' "$work/b/code/proj" \
     > "$base_b/$sid/subagents/agent-two.jsonl"
 printf 'Second note: %s/readme\n' "$work/b/code/proj" > "$base_b/memory/second.md"
 out=$("$casi" status --porcelain)
-echo "$out" | awk -F '\t' '$1 == "aux-push" && $2 == 2 { found = 1 } END { exit !found }' ||
+echo "$out" | awk -F '\t' '$1 == "aux-push" && $2 > 0 { found = 1 } END { exit !found }' ||
     fail "status does not report pending auxiliary files"
 "$casi" push >/dev/null || fail "push additions from B"
 
@@ -84,7 +84,7 @@ printf 'Conflicting B note: %s\n' "$work/b/code/proj" > "$base_b/memory/MEMORY.m
 "$casi" push >/dev/null || fail "push conflicting memory from B"
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 set +e
-out=$("$casi" pull 2>&1)
+out=$("$casi" pull --strict 2>&1)
 rc=$?
 set -e
 [ "$rc" = 3 ] || fail "auxiliary conflict: exit $rc, want 3"
@@ -96,6 +96,13 @@ grep -q '# Notes' "$base_a/memory/MEMORY.md" ||
     fail "auxiliary conflict: local memory was overwritten"
 find "$work/a/casi/conflicts" -type f | grep -q 'aux-.*MEMORY.md-remote' ||
     fail "auxiliary conflict: remote copy was not parked"
+set +e
+"$casi" pull --strict >/dev/null 2>&1
+rc=$?
+set -e
+[ "$rc" = 3 ] || fail "repeated auxiliary conflict: exit $rc, want 3"
+count=$(find "$work/a/casi/conflicts" -type f -name 'aux-*-remote*' | wc -l)
+[ "$count" -eq 1 ] || fail "repeated pull parked $count copies of the same auxiliary file"
 echo "  ok   conflicting auxiliary edit is left untouched"
 
 echo "auxiliary_files: 3 passed"

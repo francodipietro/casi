@@ -61,6 +61,7 @@ static int migrate_file(const char *path, int homes_argc, char **homes,
                         const char *local_home, const char *backup_dir)
 {
     casi_buf content = CASI_BUF_INIT, cur = CASI_BUF_INIT, next = CASI_BUF_INIT;
+    casi_buf backup = CASI_BUF_INIT;
     int rc = CASI_OK, i;
 
     if ((rc = casi_fs_read_file(path, &content)) != CASI_OK)
@@ -80,29 +81,50 @@ static int migrate_file(const char *path, int homes_argc, char **homes,
         goto done;
 
     {
-        casi_buf backup = CASI_BUF_INIT;
-        size_t j;
+        const char *relative = path;
+        size_t suffix = 0;
 
-        if ((rc = casi_fs_mkdir_p(backup_dir)) != CASI_OK)
+        while (*relative == '/')
+            relative++;
+        if (*relative == '\0') {
+            rc = casi_error_set(CASI_EINVAL, "cannot back up an empty path");
             goto done;
-        if ((rc = casi_buf_printf(&backup, "%s/", backup_dir)) != CASI_OK)
-            goto done;
-        for (j = 0; path[j] != '\0'; j++)
-            if ((rc = casi_buf_putc(&backup, path[j] == '/' ? '-' : path[j])) != CASI_OK)
+        }
+        /* Preserve the directory hierarchy: replacing '/' with '-' can map
+         * different source paths to the same backup filename. Never replace
+         * an earlier migration backup, including on a later invocation. */
+        for (;;) {
+            casi_stat st;
+
+            casi_buf_clear(&backup);
+            if (suffix == 0)
+                rc = casi_buf_printf(&backup, "%s/%s", backup_dir, relative);
+            else
+                rc = casi_buf_printf(&backup, "%s/%s.%zu", backup_dir,
+                                     relative, suffix);
+            if (rc != CASI_OK)
                 goto done;
+            rc = casi_fs_stat(casi_buf_cstr(&backup), &st);
+            if (rc == CASI_ENOTFOUND) {
+                casi_error_clear();
+                break;
+            }
+            if (rc != CASI_OK)
+                goto done;
+            suffix++;
+        }
         if ((rc = casi_fs_write_file_atomic(casi_buf_cstr(&backup),
-                                            content.ptr, content.len)) != CASI_OK)
+                                            content.ptr, content.len)) != CASI_OK ||
+            (rc = casi_fs_write_file_atomic(path, cur.ptr, cur.len)) != CASI_OK)
             goto done;
-        if ((rc = casi_fs_write_file_atomic(path, cur.ptr, cur.len)) != CASI_OK)
-            goto done;
-        casi_info("migrated %s", path);
-        casi_buf_dispose(&backup);
+        casi_info("migrated %s (backup: %s)", path, casi_buf_cstr(&backup));
     }
 
 done:
     casi_buf_dispose(&content);
     casi_buf_dispose(&cur);
     casi_buf_dispose(&next);
+    casi_buf_dispose(&backup);
     return rc;
 }
 

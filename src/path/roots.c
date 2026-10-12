@@ -7,12 +7,15 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <unistd.h>
 
 struct root_entry {
     char  *name;
     char  *path;
     size_t path_len;
-    bool   automatic;
+    bool   alias;
 };
 
 struct casi_roots {
@@ -25,6 +28,7 @@ struct casi_roots {
 };
 
 static int continues_path_component(char c);
+static bool same_path_ignoring_trailing_slashes(const char *a, const char *b);
 
 int casi_roots_new(casi_roots **out)
 {
@@ -100,23 +104,31 @@ bool casi_root_name_is_valid(const char *name)
     return true;
 }
 
-static int roots_add(casi_roots *roots, const char *name, const char *local_path,
-                     bool automatic)
+static int add_root(casi_roots *roots, const char *name, const char *local_path,
+                    bool alias)
 {
     struct root_entry entry;
     size_t i;
 
     if (name == NULL || name[0] == '\0')
         return casi_error_set(CASI_EINVAL, "root name cannot be empty");
+    if (local_path == NULL)
+        return casi_error_set(CASI_EINVAL, "root path cannot be null");
     if (local_path[0] == '\0')
         return casi_error_set(CASI_EINVAL, "root \"%s\" has an empty path", name);
     if (!casi_root_name_is_valid(name))
         return casi_error_set(CASI_EINVAL,
                               "root name \"%s\" contains an invalid character", name);
 
-    /* Replacing an existing name keeps the table free of ambiguity. */
+    /* Aliases share the logical name but never replace its destination. */
     for (i = 0; i < roots->len; i++) {
-        if (strcmp(roots->items[i].name, name) == 0) {
+        if (strcmp(roots->items[i].name, name) == 0 &&
+            roots->items[i].alias == alias) {
+            if (alias && same_path_ignoring_trailing_slashes(roots->items[i].path,
+                                                               local_path))
+                return CASI_OK;
+            if (alias)
+                continue;
             char *dup = casi_strndup(local_path, trimmed_len(local_path));
 
             if (dup == NULL)
@@ -124,9 +136,6 @@ static int roots_add(casi_roots *roots, const char *name, const char *local_path
             free(roots->items[i].path);
             roots->items[i].path = dup;
             roots->items[i].path_len = strlen(dup);
-            /* An explicit root must stay explicit if an auto-discovered
-             * project happens to use its name. */
-            roots->items[i].automatic = roots->items[i].automatic && automatic;
             sort_by_path_len_desc(roots);
             rebuild_first_byte_index(roots);
             return CASI_OK;
@@ -151,7 +160,7 @@ static int roots_add(casi_roots *roots, const char *name, const char *local_path
         return CASI_ENOMEM;
     }
     entry.path_len = strlen(entry.path);
-    entry.automatic = automatic;
+    entry.alias = alias;
 
     roots->items[roots->len++] = entry;
     sort_by_path_len_desc(roots);
@@ -161,7 +170,12 @@ static int roots_add(casi_roots *roots, const char *name, const char *local_path
 
 int casi_roots_add(casi_roots *roots, const char *name, const char *local_path)
 {
-    return roots_add(roots, name, local_path, false);
+    return add_root(roots, name, local_path, false);
+}
+
+int casi_roots_add_alias(casi_roots *roots, const char *name, const char *old_path)
+{
+    return add_root(roots, name, old_path, true);
 }
 
 struct load_ctx {
@@ -183,14 +197,16 @@ static int load_one(const char *key, const char *value, void *payload)
 
     rest = key + strlen("root.");
     dot = strrchr(rest, '.');
-    if (dot == NULL || strcmp(dot, ".path") != 0)
+    if (dot == NULL || (strcmp(dot, ".path") != 0 && strcmp(dot, ".alias") != 0))
         return CASI_OK;
 
     name = casi_strndup(rest, (size_t)(dot - rest));
     if (name == NULL)
         return CASI_ENOMEM;
 
-    rc = casi_roots_add(ctx->roots, name, value);
+    rc = strcmp(dot, ".alias") == 0
+       ? casi_roots_add_alias(ctx->roots, name, value)
+       : casi_roots_add(ctx->roots, name, value);
     free(name);
     return rc;
 }
@@ -229,9 +245,9 @@ const char *casi_roots_path_at(const casi_roots *roots, size_t i)
     return i < roots->len ? roots->items[i].path : NULL;
 }
 
-bool casi_roots_is_automatic_at(const casi_roots *roots, size_t i)
+bool casi_roots_is_alias_at(const casi_roots *roots, size_t i)
 {
-    return i < roots->len && roots->items[i].automatic;
+    return i < roots->len && roots->items[i].alias;
 }
 
 /*
@@ -286,8 +302,7 @@ static int root_matches_at(const struct root_entry *entry,
 
 static const struct root_entry *find_match(const casi_roots *roots,
                                            const char *text, size_t text_len,
-                                           enum match_mode mode,
-                                           const char *automatic_name)
+                                           enum match_mode mode)
 {
     size_t i;
 
@@ -296,9 +311,7 @@ static const struct root_entry *find_match(const casi_roots *roots,
 
     /* Table is sorted longest-first, so the first hit is the longest. */
     for (i = 0; i < roots->len; i++)
-        if ((!roots->items[i].automatic || automatic_name == NULL ||
-             strcmp(roots->items[i].name, automatic_name) == 0) &&
-            root_matches_at(&roots->items[i], text, text_len, mode))
+        if (root_matches_at(&roots->items[i], text, text_len, mode))
             return &roots->items[i];
 
     return NULL;
@@ -307,7 +320,7 @@ static const struct root_entry *find_match(const casi_roots *roots,
 int casi_roots_normalize_path(const casi_roots *roots, const char *local, casi_buf *out)
 {
     size_t len = strlen(local);
-    const struct root_entry *match = find_match(roots, local, len, CASI_MATCH_PATH, NULL);
+    const struct root_entry *match = find_match(roots, local, len, CASI_MATCH_PATH);
     int rc;
 
     casi_buf_clear(out);
@@ -340,7 +353,7 @@ static const char *root_path_by_name(const casi_roots *roots, const char *name)
     size_t i;
 
     for (i = 0; i < roots->len; i++)
-        if (strcmp(roots->items[i].name, name) == 0)
+        if (!roots->items[i].alias && strcmp(roots->items[i].name, name) == 0)
             return roots->items[i].path;
     return NULL;
 }
@@ -386,11 +399,15 @@ static bool same_path_ignoring_trailing_slashes(const char *a, const char *b)
 
 int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_buf *out)
 {
-    const char *base = basename_of(local);
+    char *trimmed = casi_strndup(local, trimmed_len(local));
+    const char *base;
     casi_buf name = CASI_BUF_INIT;
     const char *existing;
     int rc;
 
+    if (trimmed == NULL)
+        return CASI_ENOMEM;
+    base = basename_of(trimmed);
     if ((rc = auto_root_name(base, &name)) != CASI_OK)
         goto done;
     existing = root_path_by_name(roots, casi_buf_cstr(&name));
@@ -398,18 +415,188 @@ int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_b
     /* Two directories with the same basename are ambiguous: refusing the
      * second registration prevents the later discovery from silently
      * rerouting the first project's sessions. */
-    if (existing != NULL && !same_path_ignoring_trailing_slashes(existing, local)) {
+    if (existing != NULL && !same_path_ignoring_trailing_slashes(existing, trimmed)) {
         rc = casi_error_set(CASI_EEXISTS,
                             "project basename \"%s\" is ambiguous: \"%s\" and \"%s\"",
-                            base, existing, local);
+                            base, existing, trimmed);
         goto done;
     }
 
-    if ((rc = roots_add(roots, casi_buf_cstr(&name), local, true)) == CASI_OK)
-        rc = casi_roots_normalize_path(roots, local, out);
+    if ((rc = casi_roots_add(roots, casi_buf_cstr(&name), trimmed)) == CASI_OK)
+        rc = casi_roots_normalize_path(roots, trimmed, out);
 
 done:
+    free(trimmed);
     casi_buf_dispose(&name);
+    return rc;
+}
+
+struct project_search {
+    const char *wanted;
+    casi_buf found;
+    size_t visited;
+    bool ambiguous;
+    bool incomplete;
+};
+
+/* Bounded search: it runs only when a remote project has no local transcript.
+ * Hidden directories and dependency/build trees cannot be useful destinations. */
+static int search_project_dir(const char *dir, unsigned int depth,
+                              struct project_search *search)
+{
+    casi_strvec names = CASI_STRVEC_INIT;
+    casi_buf path = CASI_BUF_INIT, encoded = CASI_BUF_INIT, marker = CASI_BUF_INIT;
+    size_t i;
+    int rc;
+
+    if (search->ambiguous)
+        return CASI_OK;
+    /* The supported search scope is shallow checkout layouts, not arbitrary
+     * files inside a deep tree. Reaching the depth boundary is normal; only
+     * exhausting the visit budget makes the search inconclusive. */
+    if (depth > 6)
+        return CASI_OK;
+    if (search->visited >= 20000) {
+        search->incomplete = true;
+        return CASI_OK;
+    }
+    /* A checkout is a search endpoint, not a tree to recurse into. */
+    if (depth > 0) {
+        if ((rc = casi_fs_join(&marker, dir, ".git")) != CASI_OK)
+            goto done;
+        if (casi_fs_exists(casi_buf_cstr(&marker))) {
+            rc = CASI_OK;
+            goto done;
+        }
+    }
+    rc = casi_fs_listdir(dir, &names);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        rc = CASI_OK;
+        goto done;
+    }
+    if (rc == CASI_EIO && access(dir, R_OK | X_OK) != 0 && errno == EACCES) {
+        casi_error_clear();
+        rc = CASI_OK;
+        goto done;
+    }
+    if (rc != CASI_OK)
+        goto done;
+
+    for (i = 0; i < names.len && !search->ambiguous; i++) {
+        struct stat st;
+        const char *name = names.items[i];
+        bool link;
+
+        if (name[0] == '.' || strcmp(name, "Library") == 0 ||
+            strcmp(name, "Applications") == 0 ||
+            strcmp(name, "Pictures") == 0 || strcmp(name, "Movies") == 0 ||
+            strcmp(name, "Music") == 0 ||
+            strcmp(name, "node_modules") == 0 ||
+            strcmp(name, "vendor") == 0 || strcmp(name, "target") == 0 ||
+            strcmp(name, "build") == 0 || strcmp(name, "dist") == 0)
+            continue;
+        casi_buf_clear(&path);
+        if ((rc = casi_fs_join(&path, dir, name)) != CASI_OK)
+            goto done;
+        if (lstat(casi_buf_cstr(&path), &st) != 0)
+            continue;
+        link = S_ISLNK(st.st_mode);
+        if (link && stat(casi_buf_cstr(&path), &st) != 0)
+            continue;
+        if (!S_ISDIR(st.st_mode))
+            continue;
+        search->visited++;
+        if ((rc = auto_root_name(name, &encoded)) != CASI_OK)
+            goto done;
+        if (strcmp(casi_buf_cstr(&encoded), search->wanted) == 0) {
+            if (search->found.len > 0) {
+                search->ambiguous = true;
+                break;
+            }
+            if ((rc = casi_buf_puts(&search->found, casi_buf_cstr(&path))) != CASI_OK)
+                goto done;
+            /* The matched checkout is the endpoint, even if it has no .git
+             * marker. Scanning all of its dependencies is both slow and can
+             * hit the visit limit before another checkout is considered. */
+            continue;
+        }
+        if (!link &&
+            (rc = search_project_dir(casi_buf_cstr(&path), depth + 1, search)) != CASI_OK)
+            goto done;
+    }
+    rc = CASI_OK;
+
+done:
+    casi_strvec_dispose(&names);
+    casi_buf_dispose(&path);
+    casi_buf_dispose(&encoded);
+    casi_buf_dispose(&marker);
+    return rc;
+}
+
+int casi_roots_discover_project(casi_roots *roots, const char *canonical)
+{
+    static const char *locations[] = {
+        "src", "code", "dev", "work", "projects", "repos", NULL
+    };
+    struct project_search search = { 0 };
+    casi_buf base = CASI_BUF_INIT;
+    const char *name, *home;
+    size_t i;
+    int rc = CASI_OK;
+
+    if (!casi_str_has_prefix(canonical, CASI_CANONICAL_SCHEME))
+        return CASI_OK;
+    name = canonical + strlen(CASI_CANONICAL_SCHEME);
+    /* A legacy multi-component project name has no unambiguous destination
+     * rule. Keep it unmapped rather than place transcripts under a wrong dir. */
+    if (*name == '\0' || strchr(name, '/') != NULL ||
+        root_path_by_name(roots, name) != NULL)
+        return CASI_OK;
+    home = casi_fs_home();
+    if (home == NULL)
+        return casi_error_last_code();
+    search.wanted = name;
+    /* Search likely checkout locations only. Traversing the entire home on a
+     * real Mac can exhaust the bound inside Downloads or backup archives
+     * before reaching ~/src, and then a valid project looks unmapped. */
+    for (i = 0; locations[i] != NULL && !search.ambiguous; i++) {
+        casi_buf_clear(&base);
+        if ((rc = casi_fs_join(&base, home, locations[i])) != CASI_OK)
+            goto done;
+        if ((rc = search_project_dir(casi_buf_cstr(&base), 0, &search)) != CASI_OK)
+            goto done;
+    }
+    /* A checkout may also live directly below HOME. */
+    if (!search.ambiguous) {
+        casi_stat st;
+
+        casi_buf_clear(&base);
+        if ((rc = casi_fs_join(&base, home, name)) != CASI_OK)
+            goto done;
+        rc = casi_fs_stat(casi_buf_cstr(&base), &st);
+        if (rc == CASI_ENOTFOUND) {
+            casi_error_clear();
+            rc = CASI_OK;
+        } else if (rc == CASI_OK && st.is_dir) {
+            if (search.found.len > 0)
+                search.ambiguous = true;
+            else
+                rc = casi_buf_puts(&search.found, casi_buf_cstr(&base));
+        }
+        if (rc != CASI_OK)
+            goto done;
+    }
+    casi_debug("project discovery %s: candidate=%s visited=%zu ambiguous=%d incomplete=%d",
+               canonical, casi_buf_cstr(&search.found), search.visited,
+               search.ambiguous, search.incomplete);
+    if (!search.ambiguous && !search.incomplete && search.found.len > 0)
+        rc = casi_roots_add(roots, name, casi_buf_cstr(&search.found));
+
+done:
+    casi_buf_dispose(&search.found);
+    casi_buf_dispose(&base);
     return rc;
 }
 
@@ -426,7 +613,7 @@ static const struct root_entry *lookup_canonical(const casi_roots *roots,
     *name_len_out = name_len;
 
     for (i = 0; i < roots->len; i++)
-        if (strlen(roots->items[i].name) == name_len &&
+        if (!roots->items[i].alias && strlen(roots->items[i].name) == name_len &&
             memcmp(roots->items[i].name, name, name_len) == 0)
             return &roots->items[i];
 
@@ -459,8 +646,7 @@ int casi_roots_denormalize_path(const casi_roots *roots, const char *canonical,
     return casi_buf_puts(out, canonical + prefix_len);
 }
 
-static int normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf *out,
-                          const char *automatic_name)
+int casi_roots_normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf *out)
 {
     const char *p = in->ptr != NULL ? in->ptr : "";
     size_t len = in->len, i = 0, span_start = 0;
@@ -479,7 +665,7 @@ static int normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf 
             continue;
         }
 
-        match = find_match(roots, p + i, len - i, CASI_MATCH_TEXT, automatic_name);
+        match = find_match(roots, p + i, len - i, CASI_MATCH_TEXT);
         if (match == NULL) {
             i++;
             continue;
@@ -496,31 +682,6 @@ static int normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf 
     }
 
     return casi_buf_put(out, p + span_start, len - span_start);
-}
-
-int casi_roots_normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf *out)
-{
-    return normalize_text(roots, in, out, NULL);
-}
-
-int casi_roots_normalize_session_text(const casi_roots *roots, const char *project_path,
-                                      const casi_buf *in, casi_buf *out)
-{
-    static const char scheme[] = CASI_CANONICAL_SCHEME;
-    const char *name, *slash;
-    char *automatic_name;
-    int rc;
-
-    if (!casi_str_has_prefix(project_path, scheme))
-        return casi_error_set(CASI_EINVAL, "project path is not canonical: %s", project_path);
-    name = project_path + sizeof(scheme) - 1;
-    slash = strchr(name, '/');
-    automatic_name = casi_strndup(name, slash != NULL ? (size_t)(slash - name) : strlen(name));
-    if (automatic_name == NULL)
-        return casi_error_set(CASI_ENOMEM, "out of memory selecting project root");
-    rc = normalize_text(roots, in, out, automatic_name);
-    free(automatic_name);
-    return rc;
 }
 
 int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
@@ -569,7 +730,7 @@ int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
 
         match = NULL;
         for (j = 0; j < roots->len; j++)
-            if (strlen(roots->items[j].name) == name_len &&
+            if (!roots->items[j].alias && strlen(roots->items[j].name) == name_len &&
                 memcmp(roots->items[j].name, name, name_len) == 0) {
                 match = &roots->items[j];
                 break;

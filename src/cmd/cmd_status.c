@@ -6,6 +6,82 @@
 #include <stdio.h>
 #include <string.h>
 
+/* `casi_ops_load_remote()` deliberately omits our own machine branch: it is
+ * the input for pull.  Status needs a second comparison for push, though:
+ * comparing local content to the other machines made already-published,
+ * machine-local sessions look perpetually "to push". */
+static int publication_pending(casi_ctx *ctx, casi_entry_list *local,
+                               casi_asset_list *local_assets,
+                               casi_sync_summary *out)
+{
+    casi_entry_list published = { 0 };
+    casi_asset_list published_assets = { 0 };
+    casi_buf refname = CASI_BUF_INIT;
+    git_oid tree;
+    size_t i;
+    int rc;
+
+    memset(out, 0, sizeof(*out));
+    /* The local machine-owned ref is the snapshot that `push` commits before
+     * publishing.  Unlike refs/remotes/origin it is updated immediately by a
+     * successful push, so status does not need another fetch just to forget
+     * work it has already sent. */
+    if ((rc = casi_buf_printf(&refname, "refs/heads/casi/%s", ctx->machine)) != CASI_OK)
+        goto done;
+    rc = casi_repo_ref_tree(ctx->repo, casi_buf_cstr(&refname), &tree);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        rc = CASI_OK;
+    } else if (rc != CASI_OK) {
+        goto done;
+    } else if ((rc = casi_store_read_tree(ctx->repo, &tree, ctx->provider->name,
+                                          &published, &published_assets)) != CASI_OK) {
+        goto done;
+    }
+
+    for (i = 0; i < local->len; i++) {
+        casi_entry *remote = casi_entry_list_find(&published, local->items[i].session_id);
+        casi_sync_relation relation;
+
+        if (remote == NULL ||
+            (rc = casi_sync_compare(ctx->repo, ctx->roots, &local->items[i], remote,
+                                    &relation)) != CASI_OK) {
+            if (rc != CASI_OK && remote != NULL)
+                goto done;
+            out->to_push++;
+            out->push_bytes += local->items[i].bytes;
+        } else if (relation != CASI_SYNC_SAME) {
+            out->to_push++;
+            out->push_bytes += local->items[i].bytes;
+        }
+    }
+    for (i = 0; i < local_assets->len; i++) {
+        casi_asset *remote = casi_asset_list_find(&published_assets, local_assets->items[i].kind,
+                                                    local_assets->items[i].project_id,
+                                                    local_assets->items[i].session_id,
+                                                    local_assets->items[i].name);
+        bool equal;
+
+        if (remote == NULL) {
+            out->auxiliary_to_push++;
+            out->auxiliary_push_bytes += local_assets->items[i].bytes;
+        } else if ((rc = casi_store_asset_equal(ctx->repo, ctx->roots, &local_assets->items[i],
+                                                  remote, &equal)) != CASI_OK) {
+            goto done;
+        } else if (!equal) {
+            out->auxiliary_to_push++;
+            out->auxiliary_push_bytes += local_assets->items[i].bytes;
+        }
+    }
+    rc = CASI_OK;
+
+done:
+    casi_buf_dispose(&refname);
+    casi_entry_list_dispose(&published);
+    casi_asset_list_dispose(&published_assets);
+    return rc;
+}
+
 static int status_porcelain(const casi_sync_summary *s,
                             const casi_conflict_list *conflicts)
 {
@@ -33,7 +109,10 @@ static int status_porcelain(const casi_sync_summary *s,
                c->local->updated_at, c->remote->updated_at);
     }
 
-    return s->conflicts > 0 || s->auxiliary_conflicts > 0 ? CASI_ECONFLICT : CASI_OK;
+    /* Session divergence requires a user-visible non-zero status in strict
+     * workflows. Auxiliary files are resolved automatically by `pull`; their
+     * presence is informational and must not make `status` look broken. */
+    return s->conflicts > 0 ? CASI_ECONFLICT : CASI_OK;
 }
 
 /* One human-readable block per divergent session, so the user can tell the two
@@ -116,13 +195,23 @@ int casi_cmd_status(int argc, char **argv)
     if ((rc = casi_ops_load_remote(&ctx, &remote, &remote_assets)) != CASI_OK)
         goto done;
 
-    if ((rc = casi_ops_summarise(ctx.repo, &local, &remote, &local_assets,
+    if ((rc = casi_ops_summarise(ctx.repo, ctx.roots, &local, &remote, &local_assets,
                                  &remote_assets, &summary)) != CASI_OK)
         goto done;
+    {
+        casi_sync_summary publication;
+
+        if ((rc = publication_pending(&ctx, &local, &local_assets, &publication)) != CASI_OK)
+            goto done;
+        summary.to_push = publication.to_push;
+        summary.push_bytes = publication.push_bytes;
+        summary.auxiliary_to_push = publication.auxiliary_to_push;
+        summary.auxiliary_push_bytes = publication.auxiliary_push_bytes;
+    }
     summary.excluded = excluded;
 
     if (summary.conflicts > 0 &&
-        (rc = casi_ops_list_conflicts(ctx.repo, &local, &remote, &conflicts)) != CASI_OK)
+        (rc = casi_ops_list_conflicts(ctx.repo, ctx.roots, &local, &remote, &conflicts)) != CASI_OK)
         goto done;
 
     if (porcelain) {
@@ -177,9 +266,11 @@ int casi_cmd_status(int argc, char **argv)
             casi_info("  run `casi pull` to park the remote copies for inspection");
         }
         if (summary.auxiliary_conflicts > 0)
-            casi_warn("%zu auxiliary file(s) differ between machines",
+            casi_info("  %zu auxiliary file version(s) differ between machines; "
+                      "`casi pull` resolves them automatically and archives prior copies",
                       summary.auxiliary_conflicts);
-        rc = CASI_ECONFLICT;
+        if (summary.conflicts > 0)
+            rc = CASI_ECONFLICT;
     }
 
 done:

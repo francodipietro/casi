@@ -38,6 +38,13 @@ grep -q "$work/foreign" "$f" && fail "foreign home leaked into the transcript"
 
 backup="$work/home/casi/migrate-backup"
 [ -d "$backup" ] || fail "no migrate backup directory"
-[ "$(ls "$backup" | wc -l)" -ge 1 ] || fail "migrate backup directory is empty"
+original=$(find "$backup" -type f -print -quit)
+[ -n "$original" ] || fail "migrate backup directory is empty"
+first=$(cat "$original")
+printf '{"message":"again %s/c.txt"}\n' "$work/foreign" >> "$f"
+"$casi" migrate "$work/foreign" >/dev/null
+[ "$(cat "$original")" = "$first" ] || fail "second migration overwrote first backup"
+[ "$(find "$backup" -type f | wc -l)" -eq 2 ] ||
+    fail "second migration did not preserve both backup versions"
 
-echo "migrate: 1 passed"
+echo "migrate: 2 passed"

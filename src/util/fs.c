@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -186,6 +187,45 @@ int casi_fs_read_file(const char *path, casi_buf *out)
     return CASI_OK;
 }
 
+int casi_fs_file_equals_buffer(const char *path, const void *data, size_t len,
+                               bool *equal_out)
+{
+    unsigned char block[65536];
+    const unsigned char *bytes = data;
+    casi_stat st;
+    FILE *f;
+    size_t offset = 0;
+    int rc;
+
+    *equal_out = false;
+    rc = casi_fs_stat(path, &st);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        return CASI_OK;
+    }
+    if (rc != CASI_OK)
+        return rc;
+    if (st.is_dir || st.size != (uint64_t)len)
+        return CASI_OK;
+    if ((f = fopen(path, "rb")) == NULL)
+        return casi_error_set(CASI_EIO, "cannot open %s: %s", path, strerror(errno));
+
+    while (offset < len) {
+        size_t want = len - offset < sizeof(block) ? len - offset : sizeof(block);
+        size_t got = fread(block, 1, want, f);
+
+        if (got != want || memcmp(block, bytes + offset, want) != 0)
+            break;
+        offset += got;
+    }
+    if (ferror(f))
+        rc = casi_error_set(CASI_EIO, "error reading %s", path);
+    else
+        *equal_out = offset == len;
+    fclose(f);
+    return rc;
+}
+
 int casi_fs_read_file_from(const char *path, uint64_t offset, casi_buf *out)
 {
     FILE *f;
@@ -290,6 +330,91 @@ int casi_fs_rename_replace(const char *from, const char *to)
     return CASI_OK;
 }
 
+static int remove_tree_inner(const char *path)
+{
+    struct stat st;
+    DIR *dir = NULL;
+    struct dirent *ent;
+    int rc = CASI_OK;
+
+    if (lstat(path, &st) != 0)
+        return casi_error_set(CASI_EIO, "cannot stat %s: %s", path, strerror(errno));
+    if (!S_ISDIR(st.st_mode)) {
+        if (unlink(path) != 0)
+            return casi_error_set(CASI_EIO, "cannot remove %s: %s", path, strerror(errno));
+        return CASI_OK;
+    }
+
+    if ((dir = opendir(path)) == NULL)
+        return casi_error_set(CASI_EIO, "cannot open directory %s: %s", path, strerror(errno));
+    while ((ent = readdir(dir)) != NULL) {
+        casi_buf child = CASI_BUF_INIT;
+
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+            continue;
+        rc = casi_fs_join(&child, path, ent->d_name);
+        if (rc == CASI_OK)
+            rc = remove_tree_inner(casi_buf_cstr(&child));
+        casi_buf_dispose(&child);
+        if (rc != CASI_OK)
+            break;
+    }
+    if (closedir(dir) != 0 && rc == CASI_OK)
+        rc = casi_error_set(CASI_EIO, "cannot close directory %s: %s", path, strerror(errno));
+    if (rc == CASI_OK && rmdir(path) != 0)
+        rc = casi_error_set(CASI_EIO, "cannot remove directory %s: %s", path, strerror(errno));
+    return rc;
+}
+
+int casi_fs_remove_tree(const char *path)
+{
+    if (path == NULL || path[0] == '\0')
+        return casi_error_set(CASI_EINVAL, "empty removal path");
+    return remove_tree_inner(path);
+}
+
+/* rename(2) makes the replacement atomic for running processes, but it does
+ * not by itself promise that a power cut cannot roll the directory back to
+ * its previous state.  Flush the directory after each atomic replacement so
+ * a successfully returned pull has durable archive and transcript entries.
+ * `path` is always a normal UTF-8 slash-separated casi path. */
+static int fsync_parent_dir(const char *path)
+{
+    casi_buf dir = CASI_BUF_INIT;
+    int fd = -1;
+    int rc;
+
+    if ((rc = casi_fs_dirname(&dir, path)) != CASI_OK)
+        goto done;
+    fd = open(casi_buf_cstr(&dir), O_RDONLY);
+    if (fd < 0) {
+        rc = casi_error_set(CASI_EIO, "cannot open directory %s: %s",
+                            casi_buf_cstr(&dir), strerror(errno));
+        goto done;
+    }
+    if (fsync(fd) != 0) {
+#if defined(__APPLE__)
+        /* Darwin rejects fsync() on a directory (EINVAL). The replacement
+         * itself remains atomic and the file was flushed above; do not turn a
+         * successful write into a spurious macOS failure. */
+        if (errno == EINVAL) {
+            rc = CASI_OK;
+            goto done;
+        }
+#endif
+        rc = casi_error_set(CASI_EIO, "cannot flush directory %s: %s",
+                            casi_buf_cstr(&dir), strerror(errno));
+        goto done;
+    }
+    rc = CASI_OK;
+
+done:
+    if (fd >= 0)
+        close(fd);
+    casi_buf_dispose(&dir);
+    return rc;
+}
+
 int casi_fs_symlink(const char *target, const char *path)
 {
     if (symlink(target, path) != 0)
@@ -327,6 +452,14 @@ static int write_file_atomic(const char *path, const void *data, size_t len, boo
         goto out;
     }
 
+    /* fflush/fclose only hands bytes to the kernel.  The file must reach the
+     * filesystem before its name becomes the durable current transcript. */
+    if (fsync(fileno(f)) != 0) {
+        rc = casi_error_set(CASI_EIO, "cannot flush %s: %s",
+                            casi_buf_cstr(&tmp), strerror(errno));
+        goto out;
+    }
+
     if (fclose(f) != 0) {
         f = NULL;
         rc = casi_error_set(CASI_EIO, "cannot flush %s: %s",
@@ -336,6 +469,8 @@ static int write_file_atomic(const char *path, const void *data, size_t len, boo
     f = NULL;
 
     rc = casi_fs_rename_replace(casi_buf_cstr(&tmp), path);
+    if (rc == CASI_OK)
+        rc = fsync_parent_dir(path);
 
 out:
     if (f != NULL)

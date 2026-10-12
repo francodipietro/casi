@@ -28,6 +28,8 @@ typedef struct {
 /* Local sessions, chunked into the store and ready to compare. */
 int casi_ops_scan_local(casi_ctx *ctx, casi_entry_list *out,
                          casi_asset_list *assets_out, size_t *excluded_out);
+int casi_ops_scan_local_read_only(casi_ctx *ctx, casi_entry_list *out,
+                                   casi_asset_list *assets_out, size_t *excluded_out);
 
 /* The union of every other machine's branch. Sessions present on several
  * machines collapse to the most advanced copy. */
@@ -35,7 +37,8 @@ int casi_ops_load_remote(casi_ctx *ctx, casi_entry_list *out,
                           casi_asset_list *assets_out);
 
 /* Compares the two sides without changing anything. */
-int casi_ops_summarise(casi_repo *repo, casi_entry_list *local,
+int casi_ops_summarise(casi_repo *repo, const casi_roots *roots,
+                       casi_entry_list *local,
                        casi_entry_list *remote, casi_asset_list *local_assets,
                        casi_asset_list *remote_assets, casi_sync_summary *out);
 
@@ -55,7 +58,8 @@ typedef struct {
 /* Every session that exists on both sides and genuinely diverged, with the
  * number of leading chunks the two copies still share. Pointers into the two
  * entry lists; the caller must keep them alive while the list is in use. */
-int  casi_ops_list_conflicts(casi_repo *repo, casi_entry_list *local,
+int  casi_ops_list_conflicts(casi_repo *repo, const casi_roots *roots,
+                             casi_entry_list *local,
                              casi_entry_list *remote, casi_conflict_list *out);
 void casi_conflict_list_dispose(casi_conflict_list *list);
 

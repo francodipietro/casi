@@ -88,4 +88,18 @@ after_ref=$(git -C "$work/remote.git" rev-parse refs/heads/casi/machine-a)
 [ "$before_ref" = "$after_ref" ] || fail "push with no changes still moved the ref"
 echo "  ok   push with no changes is a no-op"
 
-echo "two_machines: 7 passed"
+# spec001:R1,R3 — Status compares outgoing work with this machine's published snapshot, not
+# with sessions that happen to exist only on another machine.  After the
+# round-trip above it must therefore be clean in both directions.
+out=$("$casi" status --porcelain)
+echo "$out" | awk -F '\t' '$1 == "push" && $2 == 0 { found = 1 } END { exit !found }' ||
+    fail "converged status still reports sessions to push"
+echo "$out" | awk -F '\t' '$1 == "pull" && $2 == 0 { found = 1 } END { exit !found }' ||
+    fail "converged status still reports sessions to pull"
+echo "$out" | awk -F '\t' '$1 == "aux-push" && $2 == 0 { found = 1 } END { exit !found }' ||
+    fail "converged status still reports auxiliary files to push"
+echo "$out" | awk -F '\t' '$1 == "aux-pull" && $2 == 0 { found = 1 } END { exit !found }' ||
+    fail "converged status still reports auxiliary files to pull"
+echo "  ok   converged status has no pending transfers"
+
+echo "two_machines: 8 passed"

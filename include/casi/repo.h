@@ -30,6 +30,10 @@ typedef struct casi_repo casi_repo;
 int  casi_repo_open(casi_repo **out);
 /* Opens it, creating the bare repository if needed. */
 int  casi_repo_init(casi_repo **out);
+/* An isolated temporary object database which reads immutable objects from
+ * `source`. Used by planners that must hash current files without changing
+ * the real store or its stat cache. */
+int  casi_repo_scratch(casi_repo **out, casi_repo *source);
 void casi_repo_free(casi_repo *repo);
 
 git_repository *casi_repo_git(casi_repo *repo);

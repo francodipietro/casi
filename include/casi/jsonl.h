@@ -38,6 +38,11 @@ bool casi_json_has_key(const char *data, size_t len, const char *key);
  * runs and only the first record reflects where it started. */
 bool casi_jsonl_first_string(const char *data, size_t len, const char *key, casi_buf *out);
 
+/* Same scan in the opposite direction: returns the last record that carries
+ * key. Session events are chronological JSONL, so callers can compare ISO
+ * timestamps without trusting filesystem mtimes. */
+bool casi_jsonl_last_string(const char *data, size_t len, const char *key, casi_buf *out);
+
 /* Replaces `out` with `value` escaped for use inside a JSON string. */
 int casi_json_escape_string(const char *value, casi_buf *out);
 

@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 #include "cmd/cmd.h"
 
+#include <string.h>
+
 int casi_cmd_sync(int argc, char **argv)
 {
     int rc;
 
-    (void)argv;
-
-    if (argc != 0)
+    if (argc > 1 || (argc == 1 && strcmp(argv[0], "--strict") != 0))
         return casi_error_set(CASI_EINVAL, "usage: %s",
                               casi_command_lookup("sync")->usage);
 
@@ -20,7 +20,7 @@ int casi_cmd_sync(int argc, char **argv)
      * A conflict does not abort the push: the local transcripts are still
      * worth publishing, and the parked copies are still there to inspect.
      */
-    rc = casi_cmd_pull(0, NULL);
+    rc = casi_cmd_pull(argc, argv);
     if (rc != CASI_OK && rc != CASI_ECONFLICT)
         return rc;
 
