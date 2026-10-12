@@ -38,6 +38,7 @@ export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude
 mk "$work/b" "$work/b/src/p" "aaaaaaaa-0000-0000-0000-000000000000" "base A"
 mk "$work/b" "$work/b/src/p" "bbbbbbbb-0000-0000-0000-000000000000" "base B"
 "$casi" pull >/dev/null
+"$casi" push >/dev/null
 enc_b=$(echo "$work/b/src/p" | sed 's/[^a-zA-Z0-9]/-/g')
 printf '{"cwd":"%s","message":"B edit"}\n' "$work/b/src/p" \
     >> "$work/b/.claude/projects/$enc_b/aaaaaaaa-0000-0000-0000-000000000000.jsonl"
@@ -66,6 +67,20 @@ out=$("$casi" diagnose)
 echo "$out" | grep -q '^session	same	aaaaaaaa' || fail "aaaaaaaa still diverged after --theirs-all"
 echo "$out" | grep -q '^session	same	bbbbbbbb' || fail "bbbbbbbb still diverged after --theirs-all"
 echo "$out" | grep -q 'diverged' && fail "--theirs-all left divergences behind"
+
+# pull materializes remote files locally. The following push must rescan those
+# replacements instead of reusing the pre-pull stat cache, or it republishes
+# the old local copies and recreates the divergence.
+before_ref=$(git -C "$work/b/casi/repo.git" rev-parse refs/heads/casi/machine-b)
+"$casi" push >/dev/null || fail "push after --theirs-all"
+after_ref=$(git -C "$work/b/casi/repo.git" rev-parse refs/heads/casi/machine-b)
+[ "$before_ref" != "$after_ref" ] || fail "push after --theirs-all reused stale session index"
+
+export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
+git -C "$work/a/casi/repo.git" fetch -q origin \
+    '+refs/heads/casi/*:refs/remotes/origin/casi/*'
+out=$("$casi" diagnose)
+echo "$out" | grep -q 'diverged' && fail "push after --theirs-all republished a divergence"
 echo "  ok   --theirs-all resolves sessions and auxiliary files in one pass"
 
 echo "theirs_all: 1 passed"

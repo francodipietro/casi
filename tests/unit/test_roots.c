@@ -386,6 +386,24 @@ static void test_auto_project_name_collision_is_rejected(void)
     casi_roots_free(r);
 }
 
+static void test_session_text_ignores_unrelated_auto_roots(void)
+{
+    casi_roots *r = NULL;
+    casi_buf in = CASI_BUF_INIT, out = CASI_BUF_INIT;
+
+    ASSERT_OK(casi_roots_new(&r));
+    ASSERT_OK(casi_roots_canonicalize_project(r, "/work/bookit", &out));
+    ASSERT_OK(casi_roots_canonicalize_project(r, "/work/casi", &out));
+    ASSERT_OK(casi_buf_puts(&in, "own /work/bookit/a other /work/casi/b"));
+
+    ASSERT_OK(casi_roots_normalize_session_text(r, "casi://bookit", &in, &out));
+    ASSERT_EQ_STR(casi_buf_cstr(&out), "own casi://bookit/a other /work/casi/b");
+
+    casi_buf_dispose(&in);
+    casi_buf_dispose(&out);
+    casi_roots_free(r);
+}
+
 int main(void)
 {
     int status;
@@ -414,6 +432,7 @@ int main(void)
     RUN_TEST(test_loading_roots_from_config);
     RUN_TEST(test_auto_project_names_encode_invalid_bytes);
     RUN_TEST(test_auto_project_name_collision_is_rejected);
+    RUN_TEST(test_session_text_ignores_unrelated_auto_roots);
 
     status = casi_test_report("roots");
     casi_shutdown();

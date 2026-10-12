@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 #include "cmd/cmd.h"
 #include "casi/ctx.h"
+#include "casi/index.h"
 
 #include <string.h>
 
@@ -35,9 +36,16 @@ static int rewrite_one(const char *in, size_t len, const char *from, const char 
 
         if (memcmp(in + i, from, from_len) != 0)
             continue;
-        /* Only at a path boundary: followed by '/', a closing quote, or end. */
+        /* A home is a complete path when it ends or the next byte cannot be
+         * part of a path component.  Shell arguments such as "-type" are
+         * valid delimiters too. */
         next = (i + from_len < len) ? in[i + from_len] : '\0';
-        if (next != '/' && next != '"' && next != '\'')
+        if (next != '\0' && next != '/' &&
+            ((next >= '0' && next <= '9') ||
+             (next >= 'a' && next <= 'z') ||
+             (next >= 'A' && next <= 'Z') ||
+             next == '-' || next == '_' || next == '.' || next == '~' ||
+             next == '@' || next == '+'))
             continue;
 
         if ((rc = casi_buf_put(out, in + span, i - span)) != CASI_OK ||
@@ -139,6 +147,12 @@ int casi_cmd_migrate(int argc, char **argv)
         if ((rc = migrate_file(aux.items[i].local_path, argc, argv, local_home,
                                casi_buf_cstr(&backup_dir))) != CASI_OK)
             goto done;
+
+    /* migrate rewrites files behind the stat cache.  Drop it even when no
+     * replacement was needed: a later push must never reuse pre-migration
+     * chunks after this command has completed. */
+    if ((rc = casi_index_invalidate()) != CASI_OK)
+        goto done;
 
     casi_info("migration complete; originals backed up at %s",
               casi_buf_cstr(&backup_dir));

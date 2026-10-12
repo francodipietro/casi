@@ -58,5 +58,6 @@ int casi_index_update(casi_index *index, const char *provider, const char *path,
 
 /* Writes only when updates were made, through an atomic replacement. */
 int casi_index_flush(casi_index *index);
+int casi_index_invalidate(void);
 
 #endif /* CASI_INDEX_H */
