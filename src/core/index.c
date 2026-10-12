@@ -8,9 +8,8 @@
 #include <string.h>
 
 /* This is a private, local cache format.  Changing it invalidates safely. */
-/* IDX4: automatic roots are now scoped to the session being scanned. Cached
- * chunk OIDs made with the old global-root rule are not interchangeable. */
-#define CASI_INDEX_MAGIC "CASIIDX6"
+/* IDX7: cache identity is the ordered primary-root and alias mapping. */
+#define CASI_INDEX_MAGIC "CASIIDX7"
 #define CASI_INDEX_MAGIC_LEN (sizeof(CASI_INDEX_MAGIC) - 1)
 #define CASI_INDEX_CHECKSUM_LEN GIT_OID_RAWSZ
 
@@ -48,7 +47,7 @@ static int roots_key_build(const casi_roots *roots, const char *crypto_key_id,
         if ((rc = casi_buf_puts(out, casi_roots_name_at(roots, i))) != CASI_OK ||
             (rc = casi_buf_putc(out, '\0')) != CASI_OK ||
             (rc = casi_buf_puts(out, casi_roots_path_at(roots, i))) != CASI_OK ||
-            (rc = casi_buf_putc(out, casi_roots_is_automatic_at(roots, i) ? 'A' : 'E')) != CASI_OK ||
+            (rc = casi_buf_putc(out, casi_roots_is_alias_at(roots, i) ? 'A' : 'P')) != CASI_OK ||
             (rc = casi_buf_putc(out, '\0')) != CASI_OK)
             return rc;
     }

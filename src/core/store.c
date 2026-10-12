@@ -595,8 +595,7 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
     /* Normalise first, chunk second: this ordering is what makes two machines
      * with different layouts produce identical blobs. */
     if ((rc = filter_volatile_history(&raw, &filtered)) != CASI_OK ||
-        (rc = casi_roots_normalize_session_text(roots, session->project_path,
-                                                &filtered, &normalized)) != CASI_OK)
+        (rc = casi_roots_normalize_text(roots, &filtered, &normalized)) != CASI_OK)
         goto done;
     if (resume) {
         bool tail_matches;
@@ -610,8 +609,7 @@ static int scan_one_session(casi_repo *repo, const casi_roots *roots,
             casi_buf_clear(&raw);
             casi_buf_clear(&normalized);
             if ((rc = casi_fs_read_file(session->local_path, &raw)) != CASI_OK ||
-                (rc = casi_roots_normalize_session_text(roots, session->project_path,
-                                                        &raw, &normalized)) != CASI_OK)
+                (rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
                 goto done;
         }
     }
@@ -686,8 +684,7 @@ static int scan_one_asset(casi_repo *repo, const casi_roots *roots,
     memset(&asset, 0, sizeof(asset));
     if ((rc = casi_fs_read_file(file->local_path, &raw)) != CASI_OK)
         goto done;
-    if ((rc = casi_roots_normalize_session_text(roots, file->project_path,
-                                                &raw, &normalized)) != CASI_OK)
+    if ((rc = casi_roots_normalize_text(roots, &raw, &normalized)) != CASI_OK)
         goto done;
     if (casi_repo_crypto_enabled(repo)) {
         if ((rc = asset_wrap(file, &normalized, &wrapped)) != CASI_OK)
@@ -720,11 +717,11 @@ done:
     return rc;
 }
 
-int casi_store_scan_local(casi_repo *repo, casi_roots *roots,
-                          const casi_provider *provider,
-                          const casi_strvec *exclude,
-                          casi_entry_list *out, casi_asset_list *assets_out,
-                          size_t *excluded_out)
+static int scan_local(casi_repo *repo, casi_roots *roots,
+                      const casi_provider *provider,
+                      const casi_strvec *exclude,
+                      casi_entry_list *out, casi_asset_list *assets_out,
+                      size_t *excluded_out, bool persist_index)
 {
     casi_session_list sessions;
     casi_aux_file_list aux_files;
@@ -763,7 +760,8 @@ int casi_store_scan_local(casi_repo *repo, casi_roots *roots,
             goto done;
     }
 
-    rc = casi_index_flush(index);
+    if (persist_index)
+        rc = casi_index_flush(index);
 
 done:
     if (excluded_out != NULL)
@@ -773,6 +771,26 @@ done:
     casi_index_free(index);
     casi_buf_dispose(&crypto_key_id);
     return rc;
+}
+
+int casi_store_scan_local(casi_repo *repo, casi_roots *roots,
+                          const casi_provider *provider,
+                          const casi_strvec *exclude,
+                          casi_entry_list *out, casi_asset_list *assets_out,
+                          size_t *excluded_out)
+{
+    return scan_local(repo, roots, provider, exclude, out, assets_out,
+                      excluded_out, true);
+}
+
+int casi_store_scan_local_read_only(casi_repo *repo, casi_roots *roots,
+                                    const casi_provider *provider,
+                                    const casi_strvec *exclude,
+                                    casi_entry_list *out, casi_asset_list *assets_out,
+                                    size_t *excluded_out)
+{
+    return scan_local(repo, roots, provider, exclude, out, assets_out,
+                      excluded_out, false);
 }
 
 int casi_store_write_tree(casi_repo *repo, const char *provider_name,
@@ -1525,10 +1543,184 @@ done:
 
 /* --- materialising ---------------------------------------------------- */
 
+/* Earlier stores could encode the same project under a broad root (for
+ * example casi://src/work/bookit) even when the first cwd already uses
+ * casi://bookit. Its basename is the project's unique logical identity, so
+ * translate only canonical paths with that complete directory component.
+ * References outside the project remain unmapped and therefore pending. */
+static int rebase_legacy_project(const casi_entry *entry, const casi_buf *joined,
+                                 casi_buf *out, bool *changed)
+{
+    const char *to, *base;
+    const size_t scheme_len = strlen(CASI_CANONICAL_SCHEME);
+    size_t base_len, i = 0, start = 0;
+    int rc;
+
+    *changed = false;
+    if (entry->project_path == NULL)
+        return CASI_OK;
+    to = entry->project_path;
+    base = strrchr(to, '/');
+    if (base == NULL || base[1] == '\0' ||
+        strncmp(to, CASI_CANONICAL_SCHEME, scheme_len) != 0)
+        return CASI_OK;
+    base++;
+    base_len = strlen(base);
+
+    while (i + scheme_len < joined->len) {
+        size_t segment, candidate_end = 0;
+
+        if (memcmp(joined->ptr + i, CASI_CANONICAL_SCHEME,
+                   scheme_len) != 0) {
+            i++;
+            continue;
+        }
+        segment = i + scheme_len;
+        while (segment < joined->len) {
+            size_t end = segment;
+
+            while (end < joined->len) {
+                unsigned char c = (unsigned char)joined->ptr[end];
+
+                if ((c >= '0' && c <= '9') ||
+                    (c >= 'A' && c <= 'Z') ||
+                    (c >= 'a' && c <= 'z') ||
+                    c == '_' || c == '-' || c == '.' || c == '~' ||
+                    c == '@' || c == '+' || c >= 0x80)
+                    end++;
+                else
+                    break;
+            }
+            if (end - segment == base_len &&
+                memcmp(joined->ptr + segment, base, base_len) == 0) {
+                candidate_end = end;
+                break;
+            }
+            if (end == segment || end == joined->len || joined->ptr[end] != '/')
+                break;
+            segment = end + 1;
+        }
+        if (candidate_end == 0 ||
+            (candidate_end - i == strlen(to) &&
+             memcmp(joined->ptr + i, to, strlen(to)) == 0)) {
+            i += scheme_len;
+            continue;
+        }
+        if ((rc = casi_buf_put(out, joined->ptr + start, i - start)) != CASI_OK ||
+            (rc = casi_buf_puts(out, to)) != CASI_OK)
+            return rc;
+        i = candidate_end;
+        start = i;
+        *changed = true;
+    }
+    if (*changed)
+        return casi_buf_put(out, joined->ptr + start, joined->len - start);
+    return CASI_OK;
+}
+
+static int replace_one_root(const casi_buf *input, const char *root_name,
+                            const char *local_path, casi_buf *out, bool *changed)
+{
+    const size_t scheme_len = strlen(CASI_CANONICAL_SCHEME);
+    const size_t name_len = strlen(root_name);
+    size_t i = 0, start = 0;
+    int rc;
+
+    *changed = false;
+    while (i + scheme_len + name_len <= input->len) {
+        unsigned char next;
+
+        if (memcmp(input->ptr + i, CASI_CANONICAL_SCHEME, scheme_len) != 0 ||
+            memcmp(input->ptr + i + scheme_len, root_name, name_len) != 0) {
+            i++;
+            continue;
+        }
+        next = i + scheme_len + name_len < input->len
+             ? (unsigned char)input->ptr[i + scheme_len + name_len] : 0;
+        if ((next >= '0' && next <= '9') ||
+            (next >= 'A' && next <= 'Z') ||
+            (next >= 'a' && next <= 'z') ||
+            next == '_' || next == '-' || next == '.' || next == '~' ||
+            next == '@' || next == '+' || next >= 0x80) {
+            i++;
+            continue;
+        }
+        if ((rc = casi_buf_put(out, input->ptr + start, i - start)) != CASI_OK ||
+            (rc = casi_buf_puts(out, local_path)) != CASI_OK)
+            return rc;
+        i += scheme_len + name_len;
+        start = i;
+        *changed = true;
+    }
+    if (*changed)
+        return casi_buf_put(out, input->ptr + start, input->len - start);
+    return CASI_OK;
+}
+
+/* `work` was the broad checkout root in an early store layout
+ * (`.../src/work/<project>`).  Current automatic project discovery records
+ * the project itself, or `src` for the broad checkout.  If that old token is
+ * the only missing root, reconstruct it from the known project destination:
+ * `src` maps to itself; a child project maps to its parent.  This is strictly
+ * a read-time migration and never adds a user-visible alias. */
+static int legacy_work_root_path(const casi_roots *roots, const casi_entry *entry,
+                                 const casi_buf *missing, casi_buf *out)
+{
+    const char *slash;
+    int rc;
+
+    if (strcmp(casi_buf_cstr(missing), "work") != 0 ||
+        strcmp(entry->project_path, CASI_CANONICAL_SCHEME "work") == 0)
+        return CASI_ENOTFOUND;
+    if ((rc = casi_roots_denormalize_path(roots, entry->project_path, out)) != CASI_OK)
+        return rc;
+    if (strcmp(entry->project_path, CASI_CANONICAL_SCHEME "src") == 0)
+        return CASI_OK;
+    slash = strrchr(casi_buf_cstr(out), '/');
+    if (slash == NULL || slash == out->ptr)
+        return CASI_ENOTFOUND;
+    out->len = (size_t)(slash - out->ptr);
+    out->ptr[out->len] = '\0';
+    return CASI_OK;
+}
+
+/* Project-memory files from the same layout used `casi://work` as their
+ * project key.  There is no child-session context to infer a parent from, but
+ * a configured `src` root is the unambiguous successor of that broad key.
+ * Prefer a real `work` root whenever one exists. */
+static const char *legacy_asset_project_path(const casi_roots *roots,
+                                             const char *project_path)
+{
+    casi_buf probe = CASI_BUF_INIT;
+    int rc;
+
+    if (strcmp(project_path, CASI_CANONICAL_SCHEME "work") != 0)
+        return project_path;
+    rc = casi_roots_denormalize_path(roots, project_path, &probe);
+    if (rc == CASI_OK) {
+        casi_buf_dispose(&probe);
+        return project_path;
+    }
+    casi_error_clear();
+    rc = casi_roots_denormalize_path(roots, CASI_CANONICAL_SCHEME "src", &probe);
+    casi_buf_dispose(&probe);
+    if (rc == CASI_OK)
+        return CASI_CANONICAL_SCHEME "src";
+    casi_error_clear();
+    return project_path;
+}
+
 static int reassemble(casi_repo *repo, const casi_roots *roots,
-                      const casi_entry *entry, casi_buf *out, casi_buf *unmapped_out)
+                      const casi_entry *entry, const char *extra_root,
+                      const char *extra_path, bool migrate_legacy_work,
+                      casi_buf *out,
+                      casi_buf *unmapped_out)
 {
     casi_buf joined = CASI_BUF_INIT, piece = CASI_BUF_INIT;
+    casi_buf rebased = CASI_BUF_INIT, extra = CASI_BUF_INIT;
+    casi_buf legacy = CASI_BUF_INIT, legacy_path = CASI_BUF_INIT;
+    const casi_buf *portable;
+    bool changed = false, extra_changed = false;
     size_t i;
     int rc = CASI_OK;
 
@@ -1544,12 +1736,63 @@ static int reassemble(casi_repo *repo, const casi_roots *roots,
             goto done;
     }
 
-    rc = casi_roots_denormalize_text(roots, &joined, out, unmapped_out);
+    if ((rc = rebase_legacy_project(entry, &joined, &rebased, &changed)) != CASI_OK)
+        goto done;
+    portable = changed ? &rebased : &joined;
+    if (extra_root != NULL) {
+        if ((rc = replace_one_root(portable, extra_root, extra_path,
+                                   &extra, &extra_changed)) != CASI_OK)
+            goto done;
+        if (extra_changed)
+            portable = &extra;
+    }
+    rc = casi_roots_denormalize_text(roots, portable, out, unmapped_out);
+    if (migrate_legacy_work && rc == CASI_EUNMAPPED && unmapped_out != NULL &&
+        legacy_work_root_path(roots, entry, unmapped_out, &legacy_path) == CASI_OK) {
+        casi_error_clear();
+        if ((rc = replace_one_root(portable, "work", casi_buf_cstr(&legacy_path),
+                                   &legacy, &changed)) == CASI_OK && changed)
+            rc = casi_roots_denormalize_text(roots, &legacy, out, unmapped_out);
+        else if (rc == CASI_OK)
+            rc = casi_error_set(CASI_EUNMAPPED, "could not migrate legacy work root");
+    }
 
 done:
     casi_buf_dispose(&joined);
     casi_buf_dispose(&piece);
+    casi_buf_dispose(&rebased);
+    casi_buf_dispose(&extra);
+    casi_buf_dispose(&legacy);
+    casi_buf_dispose(&legacy_path);
     return rc;
+}
+
+int casi_store_materialize_content(casi_repo *repo, const casi_roots *roots,
+                                   const casi_entry *entry, casi_buf *content,
+                                   casi_buf *unmapped_out)
+{
+    return reassemble(repo, roots, entry, NULL, NULL, false, content, unmapped_out);
+}
+
+int casi_store_materialize_import_content(casi_repo *repo, const casi_roots *roots,
+                                          const casi_entry *entry, casi_buf *content,
+                                          casi_buf *unmapped_out)
+{
+    return reassemble(repo, roots, entry, NULL, NULL, true, content, unmapped_out);
+}
+
+int casi_store_materialize_content_with_root(casi_repo *repo,
+                                              const casi_roots *roots,
+                                              const casi_entry *entry,
+                                              const char *root_name,
+                                              const char *local_path,
+                                              casi_buf *content,
+                                              casi_buf *unmapped_out)
+{
+    if (root_name == NULL || root_name[0] == '\0' || local_path == NULL)
+        return casi_error_set(CASI_EINVAL, "invalid tentative root mapping");
+    return reassemble(repo, roots, entry, root_name, local_path, false,
+                      content, unmapped_out);
 }
 
 int casi_store_materialize_to(casi_repo *repo, const casi_roots *roots,
@@ -1559,7 +1802,8 @@ int casi_store_materialize_to(casi_repo *repo, const casi_roots *roots,
     casi_buf content = CASI_BUF_INIT;
     int rc;
 
-    if ((rc = reassemble(repo, roots, entry, &content, unmapped_out)) != CASI_OK)
+    if ((rc = reassemble(repo, roots, entry, NULL, NULL, true,
+                         &content, unmapped_out)) != CASI_OK)
         goto done;
 
     /* Atomic: an interrupted pull never leaves a half-written transcript
@@ -1567,6 +1811,23 @@ int casi_store_materialize_to(casi_repo *repo, const casi_roots *roots,
     rc = casi_fs_write_file_atomic(path, content.ptr, content.len);
 
 done:
+    casi_buf_dispose(&content);
+    return rc;
+}
+
+int casi_store_validate_entry(casi_repo *repo, const casi_roots *roots,
+                              const casi_provider *provider,
+                              const casi_entry *entry, casi_buf *unmapped_out)
+{
+    casi_buf path = CASI_BUF_INIT, content = CASI_BUF_INIT;
+    int rc;
+
+    rc = provider->local_path_for(roots, entry->project_path,
+                                  entry->session_id, &path);
+    if (rc == CASI_OK)
+        rc = reassemble(repo, roots, entry, NULL, NULL, true,
+                        &content, unmapped_out);
+    casi_buf_dispose(&path);
     casi_buf_dispose(&content);
     return rc;
 }
@@ -1590,12 +1851,16 @@ done:
     return rc;
 }
 
-int casi_store_materialize_asset_to(casi_repo *repo, const casi_roots *roots,
-                                    const casi_asset *asset, const char *path,
-                                    casi_buf *unmapped_out)
+static int prepare_asset(casi_repo *repo, const casi_roots *roots,
+                         const casi_asset *asset, casi_buf *local,
+                         casi_buf *unmapped_out)
 {
     casi_buf normalized = CASI_BUF_INIT, content = CASI_BUF_INIT, scope = CASI_BUF_INIT,
-             expected_scope = CASI_BUF_INIT, name = CASI_BUF_INIT, local = CASI_BUF_INIT;
+             expected_scope = CASI_BUF_INIT, name = CASI_BUF_INIT,
+             rebased = CASI_BUF_INIT, legacy = CASI_BUF_INIT,
+             legacy_path = CASI_BUF_INIT;
+    casi_entry project = { 0 };
+    bool changed = false;
     int rc;
 
     if ((rc = casi_repo_read_blob(repo, &asset->oid, &normalized)) != CASI_OK)
@@ -1614,10 +1879,24 @@ int casi_store_materialize_asset_to(casi_repo *repo, const casi_roots *roots,
         if ((rc = casi_buf_put(&content, normalized.ptr, normalized.len)) != CASI_OK)
             goto done;
     }
-    if ((rc = casi_roots_denormalize_text(roots, &content, &local,
-                                          unmapped_out)) != CASI_OK)
+    project.project_path = (char *)legacy_asset_project_path(roots,
+                                                              asset->project_path);
+    if ((rc = rebase_legacy_project(&project, &content, &rebased, &changed)) != CASI_OK)
         goto done;
-    rc = casi_fs_write_file_atomic(path, local.ptr, local.len);
+    rc = casi_roots_denormalize_text(roots, changed ? &rebased : &content,
+                                     local, unmapped_out);
+    if (rc == CASI_EUNMAPPED && unmapped_out != NULL &&
+        legacy_work_root_path(roots, &project, unmapped_out, &legacy_path) == CASI_OK) {
+        bool replaced;
+
+        casi_error_clear();
+        if ((rc = replace_one_root(changed ? &rebased : &content, "work",
+                                   casi_buf_cstr(&legacy_path), &legacy,
+                                   &replaced)) == CASI_OK && replaced)
+            rc = casi_roots_denormalize_text(roots, &legacy, local, unmapped_out);
+        else if (rc == CASI_OK)
+            rc = casi_error_set(CASI_EUNMAPPED, "could not migrate legacy work root");
+    }
 
 done:
     casi_buf_dispose(&normalized);
@@ -1625,6 +1904,79 @@ done:
     casi_buf_dispose(&scope);
     casi_buf_dispose(&expected_scope);
     casi_buf_dispose(&name);
+    casi_buf_dispose(&rebased);
+    casi_buf_dispose(&legacy);
+    casi_buf_dispose(&legacy_path);
+    return rc;
+}
+
+int casi_store_materialize_asset_content(casi_repo *repo, const casi_roots *roots,
+                                         const casi_asset *asset, casi_buf *content,
+                                         casi_buf *unmapped_out)
+{
+    return prepare_asset(repo, roots, asset, content, unmapped_out);
+}
+
+int casi_store_asset_equal(casi_repo *repo, const casi_roots *roots,
+                           const casi_asset *a, const casi_asset *b, bool *equal)
+{
+    casi_buf left = CASI_BUF_INIT, right = CASI_BUF_INIT, unmapped = CASI_BUF_INIT;
+    int rc = CASI_OK;
+
+    *equal = git_oid_equal(&a->oid, &b->oid);
+    if (*equal)
+        return CASI_OK;
+    rc = prepare_asset(repo, roots, a, &left, &unmapped);
+    if (rc == CASI_EUNMAPPED) {
+        casi_error_clear();
+        rc = CASI_OK;
+        goto done;
+    }
+    if (rc != CASI_OK)
+        goto done;
+    rc = prepare_asset(repo, roots, b, &right, &unmapped);
+    if (rc == CASI_EUNMAPPED) {
+        casi_error_clear();
+        rc = CASI_OK;
+        goto done;
+    }
+    if (rc == CASI_OK)
+        *equal = left.len == right.len &&
+                 (left.len == 0 || memcmp(left.ptr, right.ptr, left.len) == 0);
+
+done:
+    casi_buf_dispose(&left);
+    casi_buf_dispose(&right);
+    casi_buf_dispose(&unmapped);
+    return rc;
+}
+
+int casi_store_materialize_asset_to(casi_repo *repo, const casi_roots *roots,
+                                    const casi_asset *asset, const char *path,
+                                    casi_buf *unmapped_out)
+{
+    casi_buf local = CASI_BUF_INIT;
+    int rc = prepare_asset(repo, roots, asset, &local, unmapped_out);
+
+    if (rc == CASI_OK)
+        rc = casi_fs_write_file_atomic(path, local.ptr, local.len);
+    casi_buf_dispose(&local);
+    return rc;
+}
+
+int casi_store_validate_asset(casi_repo *repo, const casi_roots *roots,
+                              const casi_provider *provider,
+                              const casi_asset *asset, casi_buf *unmapped_out)
+{
+    casi_buf path = CASI_BUF_INIT, local = CASI_BUF_INIT;
+    int rc;
+
+    rc = provider->aux_local_path_for(roots, asset->kind,
+                                      legacy_asset_project_path(roots, asset->project_path),
+                                      asset->session_id, asset->name, &path);
+    if (rc == CASI_OK)
+        rc = prepare_asset(repo, roots, asset, &local, unmapped_out);
+    casi_buf_dispose(&path);
     casi_buf_dispose(&local);
     return rc;
 }
@@ -1636,7 +1988,9 @@ int casi_store_materialize_asset(casi_repo *repo, const casi_roots *roots,
     casi_buf path = CASI_BUF_INIT;
     int rc;
 
-    if ((rc = provider->aux_local_path_for(roots, asset->kind, asset->project_path,
+    if ((rc = provider->aux_local_path_for(roots, asset->kind,
+                                           legacy_asset_project_path(roots,
+                                                                     asset->project_path),
                                            asset->session_id, asset->name, &path)) == CASI_OK)
         rc = casi_store_materialize_asset_to(repo, roots, asset, casi_buf_cstr(&path),
                                              unmapped_out);

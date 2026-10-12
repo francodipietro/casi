@@ -62,7 +62,7 @@ int casi_cmd_diagnose(int argc, char **argv)
         if (r != NULL) {
             casi_sync_relation rel;
 
-            if ((rc = casi_sync_compare(ctx.repo, l, r, &rel)) != CASI_OK)
+            if ((rc = casi_sync_compare(ctx.repo, ctx.roots, l, r, &rel)) != CASI_OK)
                 goto done;
             switch (rel) {
             case CASI_SYNC_SAME:         relation = "same";         kind = 0; break;

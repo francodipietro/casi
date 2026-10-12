@@ -29,6 +29,14 @@ void casi_crypto_dispose(casi_crypto *crypto);
 int casi_crypto_generate_key_file(const char *path);
 int casi_crypto_load_key_file(const char *path, casi_crypto *crypto);
 
+/* Password-protected transport for the 32-byte master key.  The envelope
+ * contains a random Argon2id salt and XChaCha20-Poly1305 nonce; it is safe to
+ * publish but is useless without the passphrase. */
+int casi_crypto_recovery_wrap(const unsigned char key[CASI_CRYPTO_KEY_BYTES],
+                              const char *passphrase, casi_buf *out);
+int casi_crypto_recovery_unwrap(const casi_buf *envelope, const char *passphrase,
+                                unsigned char key_out[CASI_CRYPTO_KEY_BYTES]);
+
 /* Deterministic authenticated encryption. `ad` binds the ciphertext to its
  * opaque tree path, preventing a valid blob from being transplanted elsewhere. */
 int casi_crypto_encrypt(const casi_crypto *crypto, const char *ad,

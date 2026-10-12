@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(casi
-    VERSION 0.1.7
+    VERSION 0.2.0
     DESCRIPTION "Coding Assistant Session Interchange"
     HOMEPAGE_URL "https://github.com/francodipietro/casi"
     LANGUAGES C)
@@ -166,6 +166,11 @@ target_include_directories(casi_core
             ${CMAKE_CURRENT_BINARY_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+if(APPLE)
+    # mkdtemp(3), used by the read-only pull planner, is hidden by the macOS
+    # SDK unless Darwin's extension declarations are explicitly enabled.
+    target_compile_definitions(casi_core PRIVATE _DARWIN_C_SOURCE)
+endif()
 target_link_libraries(casi_core PUBLIC casi::libgit2 casi::sodium)
 
 configure_file(

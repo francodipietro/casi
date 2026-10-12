@@ -28,5 +28,10 @@ _CPack_Packages/
 # Test scratch
 tests/tmp/
 
+# Local SDD workspace: specs are planning artifacts for this checkout, while
+# the reusable SDD skill lives outside repositories.
+/specs/
+/docs/sdd/
+
 # Claude Code personal settings
 .claude/settings.local.json

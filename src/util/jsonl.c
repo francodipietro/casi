@@ -230,6 +230,31 @@ bool casi_jsonl_first_string(const char *data, size_t len, const char *key, casi
     return false;
 }
 
+bool casi_jsonl_last_string(const char *data, size_t len, const char *key, casi_buf *out)
+{
+    casi_buf value = CASI_BUF_INIT;
+    size_t start = 0;
+    bool found = false;
+
+    casi_buf_clear(out);
+    while (start < len) {
+        const char *newline = memchr(data + start, '\n', len - start);
+        size_t line_len = newline != NULL ? (size_t)(newline - (data + start))
+                                           : len - start;
+
+        if (casi_json_find_string(data + start, line_len, key, &value)) {
+            if (casi_buf_set(out, value.ptr, value.len) != CASI_OK) {
+                found = false;
+                break;
+            }
+            found = true;
+        }
+        start += line_len + (newline != NULL);
+    }
+    casi_buf_dispose(&value);
+    return found;
+}
+
 int casi_json_escape_string(const char *value, casi_buf *out)
 {
     static const char hex[] = "0123456789abcdef";

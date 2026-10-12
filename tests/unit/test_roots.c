@@ -386,22 +386,82 @@ static void test_auto_project_name_collision_is_rejected(void)
     casi_roots_free(r);
 }
 
-static void test_session_text_ignores_unrelated_auto_roots(void)
+static void test_auto_project_strips_trailing_slashes(void)
 {
-    casi_roots *r = NULL;
-    casi_buf in = CASI_BUF_INIT, out = CASI_BUF_INIT;
+    casi_roots *roots = NULL;
+    casi_buf out = CASI_BUF_INIT;
 
-    ASSERT_OK(casi_roots_new(&r));
-    ASSERT_OK(casi_roots_canonicalize_project(r, "/work/bookit", &out));
-    ASSERT_OK(casi_roots_canonicalize_project(r, "/work/casi", &out));
-    ASSERT_OK(casi_buf_puts(&in, "own /work/bookit/a other /work/casi/b"));
+    ASSERT_OK(casi_roots_new(&roots));
+    ASSERT_OK(casi_roots_canonicalize_project(roots, "/work/project///", &out));
+    ASSERT_EQ_STR(casi_buf_cstr(&out), "casi://project");
+    check_norm(roots, "/work/project/file", "casi://project/file");
 
-    ASSERT_OK(casi_roots_normalize_session_text(r, "casi://bookit", &in, &out));
-    ASSERT_EQ_STR(casi_buf_cstr(&out), "own casi://bookit/a other /work/casi/b");
+    casi_buf_dispose(&out);
+    casi_roots_free(roots);
+}
+
+static void test_old_path_alias_normalizes_but_uses_current_destination(void)
+{
+    /* spec001:R6 — aliases normalize to the shared primary-root name. */
+    casi_roots *linux_roots = NULL, *mac = NULL;
+    casi_buf in = CASI_BUF_INIT, canonical = CASI_BUF_INIT, out = CASI_BUF_INIT;
+    size_t i, alias_count = 0, primary_count = 0;
+
+    ASSERT_OK(casi_roots_new(&linux_roots));
+    ASSERT_OK(casi_roots_new(&mac));
+    ASSERT_OK(casi_roots_add(linux_roots, "bookit", "/home/alice/src/work/bookit"));
+    ASSERT_OK(casi_roots_add_alias(linux_roots, "bookit", "/home/alice/src/bookit"));
+    ASSERT_OK(casi_roots_add(mac, "bookit", "/Users/bob/code/bookit"));
+    ASSERT_OK(casi_roots_add_alias(mac, "bookit", "/Users/bob/src/bookit"));
+
+    for (i = 0; i < casi_roots_count(linux_roots); i++) {
+        if (casi_roots_is_alias_at(linux_roots, i))
+            alias_count++;
+        else
+            primary_count++;
+    }
+    ASSERT_EQ_INT(primary_count, 1);
+    ASSERT_EQ_INT(alias_count, 1);
+
+    ASSERT_OK(casi_buf_puts(&in,
+        "{\"cwd\":\"/home/alice/src/work/bookit\","
+        "\"old\":\"/home/alice/src/bookit/readme.md\"}"));
+    ASSERT_OK(casi_roots_normalize_text(linux_roots, &in, &canonical));
+    ASSERT_EQ_STR(casi_buf_cstr(&canonical),
+        "{\"cwd\":\"casi://bookit\",\"old\":\"casi://bookit/readme.md\"}");
+    ASSERT_OK(casi_roots_denormalize_text(mac, &canonical, &out, NULL));
+    ASSERT_EQ_STR(casi_buf_cstr(&out),
+        "{\"cwd\":\"/Users/bob/code/bookit\","
+        "\"old\":\"/Users/bob/code/bookit/readme.md\"}");
 
     casi_buf_dispose(&in);
+    casi_buf_dispose(&canonical);
     casi_buf_dispose(&out);
-    casi_roots_free(r);
+    casi_roots_free(linux_roots);
+    casi_roots_free(mac);
+}
+
+static void test_alias_from_config_is_loaded(void)
+{
+    /* spec001:R6 — configured aliases never replace the primary destination. */
+    casi_config *cfg = NULL;
+    casi_roots *roots = NULL;
+    char tmpl[] = "/tmp/casi-test-alias-XXXXXX";
+    casi_buf path = CASI_BUF_INIT;
+
+    ASSERT_TRUE(mkdtemp(tmpl) != NULL);
+    ASSERT_OK(casi_buf_printf(&path, "%s/config", tmpl));
+    ASSERT_OK(casi_config_open_path(&cfg, casi_buf_cstr(&path)));
+    ASSERT_OK(casi_config_set_string(cfg, "root.p.path", "/current/p"));
+    ASSERT_OK(casi_config_set_string(cfg, "root.p.alias", "/legacy/p"));
+    ASSERT_OK(casi_roots_new(&roots));
+    ASSERT_OK(casi_roots_load(roots, cfg));
+    check_norm(roots, "/legacy/p/file", "casi://p/file");
+    check_denorm(roots, "casi://p/file", "/current/p/file");
+
+    casi_roots_free(roots);
+    casi_config_free(cfg);
+    casi_buf_dispose(&path);
 }
 
 int main(void)
@@ -432,7 +492,9 @@ int main(void)
     RUN_TEST(test_loading_roots_from_config);
     RUN_TEST(test_auto_project_names_encode_invalid_bytes);
     RUN_TEST(test_auto_project_name_collision_is_rejected);
-    RUN_TEST(test_session_text_ignores_unrelated_auto_roots);
+    RUN_TEST(test_auto_project_strips_trailing_slashes);
+    RUN_TEST(test_old_path_alias_normalizes_but_uses_current_destination);
+    RUN_TEST(test_alias_from_config_is_loaded);
 
     status = casi_test_report("roots");
     casi_shutdown();

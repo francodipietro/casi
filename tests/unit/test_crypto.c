@@ -73,6 +73,18 @@ static void test_keyfile_is_private_and_loadable(void)
     casi_buf_dispose(&path);
 }
 
+static void test_recovery_envelope(void)
+{
+    unsigned char key[CASI_CRYPTO_KEY_BYTES] = { 7 }, recovered[CASI_CRYPTO_KEY_BYTES];
+    casi_buf envelope = CASI_BUF_INIT;
+
+    ASSERT_OK(casi_crypto_recovery_wrap(key, "correct horse battery staple", &envelope));
+    ASSERT_OK(casi_crypto_recovery_unwrap(&envelope, "correct horse battery staple", recovered));
+    ASSERT_EQ_MEM(key, recovered, sizeof(key));
+    ASSERT_TRUE(casi_crypto_recovery_unwrap(&envelope, "wrong", recovered) != CASI_OK);
+    casi_buf_dispose(&envelope);
+}
+
 int main(void)
 {
     int status;
@@ -82,6 +94,7 @@ int main(void)
     RUN_TEST(test_deterministic_authenticated_encryption);
     RUN_TEST(test_path_components_are_keyed_and_stable);
     RUN_TEST(test_keyfile_is_private_and_loadable);
+    RUN_TEST(test_recovery_envelope);
     status = casi_test_report("crypto");
     casi_shutdown();
     return status;

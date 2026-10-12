@@ -90,6 +90,13 @@ int casi_store_scan_local(casi_repo *repo, casi_roots *roots,
                           const casi_strvec *exclude,
                           casi_entry_list *out, casi_asset_list *assets_out,
                           size_t *excluded_out);
+/* Same discovery and normalisation, but never persists the stat cache. The
+ * supplied repository can be a scratch object database for a true preview. */
+int casi_store_scan_local_read_only(casi_repo *repo, casi_roots *roots,
+                                    const casi_provider *provider,
+                                    const casi_strvec *exclude,
+                                    casi_entry_list *out, casi_asset_list *assets_out,
+                                    size_t *excluded_out);
 
 /* Reads the entries recorded in a tree written by a previous push. */
 int casi_store_read_tree(casi_repo *repo, const git_oid *tree,
@@ -119,6 +126,33 @@ int casi_store_materialize(casi_repo *repo, const casi_roots *roots,
 int casi_store_materialize_to(casi_repo *repo, const casi_roots *roots,
                               const casi_entry *entry, const char *path,
                               casi_buf *unmapped_out);
+/* Same translation, returned in memory for safe conflict deduplication. */
+int casi_store_materialize_content(casi_repo *repo, const casi_roots *roots,
+                                   const casi_entry *entry, casi_buf *content,
+                                   casi_buf *unmapped_out);
+/* Import-time counterpart of casi_store_materialize_content(): applies the
+ * bounded legacy-root migration used by pull, but still returns bytes in
+ * memory so conflict parking can remain atomic and deduplicated. */
+int casi_store_materialize_import_content(casi_repo *repo,
+                                          const casi_roots *roots,
+                                          const casi_entry *entry,
+                                          casi_buf *content,
+                                          casi_buf *unmapped_out);
+/* Comparison-only compatibility: translate one unresolved canonical root to
+ * a tentative local path in memory. The caller must prove exact equivalence
+ * before treating the two versions as the same. Never writes a session. */
+int casi_store_materialize_content_with_root(casi_repo *repo,
+                                              const casi_roots *roots,
+                                              const casi_entry *entry,
+                                              const char *root_name,
+                                              const char *local_path,
+                                              casi_buf *content,
+                                              casi_buf *unmapped_out);
+
+/* Check both destination and embedded paths without writing a transcript. */
+int casi_store_validate_entry(casi_repo *repo, const casi_roots *roots,
+                              const casi_provider *provider,
+                              const casi_entry *entry, casi_buf *unmapped_out);
 
 /* Rewrites paths in an auxiliary blob and materialises it where the provider
  * expects the sidecar or memory file to live. */
@@ -129,5 +163,14 @@ int casi_store_materialize_asset(casi_repo *repo, const casi_roots *roots,
 int casi_store_materialize_asset_to(casi_repo *repo, const casi_roots *roots,
                                     const casi_asset *asset, const char *path,
                                     casi_buf *unmapped_out);
+int casi_store_materialize_asset_content(casi_repo *repo, const casi_roots *roots,
+                                         const casi_asset *asset, casi_buf *content,
+                                         casi_buf *unmapped_out);
+/* Exact byte equality after path translation; unknown paths are not equal. */
+int casi_store_asset_equal(casi_repo *repo, const casi_roots *roots,
+                           const casi_asset *a, const casi_asset *b, bool *equal);
+int casi_store_validate_asset(casi_repo *repo, const casi_roots *roots,
+                              const casi_provider *provider,
+                              const casi_asset *asset, casi_buf *unmapped_out);
 
 #endif /* CASI_STORE_H */

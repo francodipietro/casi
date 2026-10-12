@@ -35,16 +35,20 @@ void casi_roots_free(casi_roots *roots);
 
 /* Later additions of the same name replace the earlier path. */
 int  casi_roots_add(casi_roots *roots, const char *name, const char *local_path);
+/* An old spelling of a project path. Used while normalising local text;
+ * denormalisation always uses the primary path registered with add(). */
+int  casi_roots_add_alias(casi_roots *roots, const char *name, const char *old_path);
 /* True when `name` can safely be used as one component of a canonical root. */
 bool casi_root_name_is_valid(const char *name);
-/* Reads every root.<name>.path out of the config, then adds the implicit
+/* Reads root.<name>.path and root.<name>.alias from the config, then adds the implicit
  * "~" root from the environment as the lowest-priority fallback. */
 int  casi_roots_load(casi_roots *roots, casi_config *cfg);
 
 size_t      casi_roots_count(const casi_roots *roots);
 const char *casi_roots_name_at(const casi_roots *roots, size_t i);
 const char *casi_roots_path_at(const casi_roots *roots, size_t i);
-bool        casi_roots_is_automatic_at(const casi_roots *roots, size_t i);
+/* Entries are either one primary destination or an old-path alias. */
+bool        casi_roots_is_alias_at(const casi_roots *roots, size_t i);
 
 /*
  * Translate a single path. normalize() maps a local path to canonical form;
@@ -62,6 +66,11 @@ int casi_roots_denormalize_path(const casi_roots *roots, const char *canonical, 
  * because the registration is part of the call. */
 int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_buf *out);
 
+/* For a remote-only project, find a unique existing directory under the
+ * current user's home and register it as this machine's destination. A
+ * missing or ambiguous directory is left unmapped; no guessed path is used. */
+int casi_roots_discover_project(casi_roots *roots, const char *canonical);
+
 /*
  * Translate every path embedded anywhere in a blob of text -- the `cwd` field
  * of each record, and the paths scattered through message bodies and tool
@@ -78,11 +87,6 @@ int casi_roots_canonicalize_project(casi_roots *roots, const char *local, casi_b
  * `casi config root.<name>.path` line is missing.
  */
 int casi_roots_normalize_text(const casi_roots *roots, const casi_buf *in, casi_buf *out);
-/* As above, but automatic project roots other than `project_path` are ignored.
- * Discovery is machine-local, so letting an unrelated discovered project
- * rewrite a transcript would make its stored form depend on that inventory. */
-int casi_roots_normalize_session_text(const casi_roots *roots, const char *project_path,
-                                      const casi_buf *in, casi_buf *out);
 int casi_roots_denormalize_text(const casi_roots *roots, const casi_buf *in,
                                  casi_buf *out, casi_buf *unmapped_out);
 

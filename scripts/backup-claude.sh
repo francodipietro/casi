@@ -140,7 +140,10 @@ mv "$staging" "$snapshot"
 staging=''
 temporary_latest="$backup_root/.latest-$snapshot_id"
 ln -s "snapshots/$snapshot_id" "$temporary_latest"
-mv -f "$temporary_latest" "$backup_root/latest"
+case "$(uname -s)" in
+    Darwin) mv -fh "$temporary_latest" "$backup_root/latest" ;;
+    *)      mv -fT "$temporary_latest" "$backup_root/latest" ;;
+esac
 
 printf '\nBackup complete.\n'
 printf 'Snapshot: %s\n' "$snapshot"

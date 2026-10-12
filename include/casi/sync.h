@@ -16,7 +16,10 @@
  *
  * The design does not *assume* strict append-only. A rewritten prefix -- a
  * rewind, a compaction -- simply fails the prefix test and surfaces as a
- * conflict, which is the honest answer.
+ * conflict, which is the honest answer. For old stores that encoded project
+ * paths under different root names, an OID mismatch gets a bounded comparison
+ * after translating both copies to the same local paths. This may prove SAME
+ * or LOCAL_AHEAD; it never accepts a legacy remote overwrite automatically.
  */
 typedef enum {
     CASI_SYNC_SAME,          /* identical; nothing to do            */
@@ -25,7 +28,8 @@ typedef enum {
     CASI_SYNC_DIVERGED       /* neither is a prefix; real conflict   */
 } casi_sync_relation;
 
-int casi_sync_compare(casi_repo *repo, const casi_entry *local,
+int casi_sync_compare(casi_repo *repo, const casi_roots *roots,
+                      const casi_entry *local,
                       const casi_entry *remote, casi_sync_relation *out);
 
 const char *casi_sync_relation_name(casi_sync_relation relation);

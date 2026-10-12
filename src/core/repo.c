@@ -2,11 +2,14 @@
 #include "casi/repo.h"
 #include "casi/casi.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <unistd.h>
 
 #define CASI_REMOTE_NAME "origin"
 #define CASI_REFSPEC_FETCH \
@@ -15,6 +18,7 @@
 struct casi_repo {
     git_repository *git;
     casi_crypto     crypto;
+    char           *scratch_path; /* owned temporary repository, if any */
 };
 
 struct casi_tree {
@@ -81,12 +85,83 @@ int casi_repo_init(casi_repo **out)
     return repo_wrap(out, git);
 }
 
+int casi_repo_scratch(casi_repo **out, casi_repo *source)
+{
+    const char *base;
+    const char *source_path;
+    casi_buf pattern = CASI_BUF_INIT, objects = CASI_BUF_INIT;
+    char *created = NULL;
+    git_repository *git = NULL;
+    git_odb *odb = NULL;
+    int rc = CASI_OK;
+
+    if (out == NULL || source == NULL || source->git == NULL)
+        return casi_error_set(CASI_EINVAL, "cannot create a scratch store without a source");
+    *out = NULL;
+    base = getenv("TMPDIR");
+    if (base == NULL || base[0] == '\0')
+        base = "/tmp";
+    if ((rc = casi_buf_printf(&pattern, "%s/casi-dry-run-XXXXXX", base)) != CASI_OK)
+        goto done;
+    created = mkdtemp(pattern.ptr);
+    if (created == NULL) {
+        rc = casi_error_set(CASI_EIO, "cannot create dry-run store: %s", strerror(errno));
+        goto done;
+    }
+    if (git_repository_init(&git, created, 1 /* bare */) != 0) {
+        rc = casi_error_set_git(CASI_EIO, "cannot initialize dry-run store");
+        goto done;
+    }
+    source_path = git_repository_path(source->git);
+    if (source_path == NULL ||
+        (rc = casi_fs_join(&objects, source_path, "objects")) != CASI_OK)
+        goto done;
+    if (git_repository_odb(&odb, git) != 0 ||
+        git_odb_add_disk_alternate(odb, casi_buf_cstr(&objects)) != 0) {
+        rc = casi_error_set_git(CASI_EIO, "cannot attach objects to dry-run store");
+        goto done;
+    }
+    git_odb_free(odb);
+    odb = NULL;
+    if ((rc = repo_wrap(out, git)) != CASI_OK) {
+        git = NULL;
+        goto done;
+    }
+    git = NULL;
+    (*out)->scratch_path = casi_strdup(created);
+    if ((*out)->scratch_path == NULL) {
+        casi_repo_free(*out);
+        *out = NULL;
+        rc = CASI_ENOMEM;
+        goto done;
+    }
+    casi_repo_set_crypto(*out, &source->crypto);
+
+done:
+    if (odb != NULL)
+        git_odb_free(odb);
+    if (git != NULL)
+        git_repository_free(git);
+    if (*out == NULL && created != NULL) {
+        if (casi_fs_remove_tree(created) != CASI_OK)
+            casi_error_clear();
+    }
+    casi_buf_dispose(&pattern);
+    casi_buf_dispose(&objects);
+    return rc;
+}
+
 void casi_repo_free(casi_repo *repo)
 {
     if (repo == NULL)
         return;
     casi_crypto_dispose(&repo->crypto);
     git_repository_free(repo->git);
+    if (repo->scratch_path != NULL) {
+        if (casi_fs_remove_tree(repo->scratch_path) != CASI_OK)
+            casi_error_clear(); /* a failed best-effort cleanup is not a command error */
+    }
+    free(repo->scratch_path);
     free(repo);
 }
 

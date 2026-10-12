@@ -13,6 +13,7 @@ set(CASI_UNIT_TESTS
     test_roots
     test_chunk
     test_crypto
+    test_sync
 )
 
 foreach(test_name IN LISTS CASI_UNIT_TESTS)
@@ -55,6 +56,10 @@ set(CASI_INTEGRATION_TESTS
     encryption
     diagnose
     migrate
+    preflight
+    path_alias
+    auto_project
+    auto_resolve
     large_session
     gc
     interruption
@@ -64,3 +69,8 @@ foreach(test_name IN LISTS CASI_INTEGRATION_TESTS)
         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/integration/${test_name}.sh
                 $<TARGET_FILE:casi> ${CMAKE_CURRENT_BINARY_DIR}/tmp/${test_name})
 endforeach()
+
+add_test(NAME backup_script
+         COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/integration/backup_script.sh
+                 ${CMAKE_SOURCE_DIR}/scripts/backup-claude.sh
+                 ${CMAKE_CURRENT_BINARY_DIR}/tmp/backup_script)

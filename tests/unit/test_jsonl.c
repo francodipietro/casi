@@ -53,6 +53,20 @@ static void test_escaped_key_text_is_not_structure(void)
     casi_buf_dispose(&value);
 }
 
+static void test_last_jsonl_string_uses_the_latest_record(void)
+{
+    const char rows[] =
+        "{\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":\"first\"}\n"
+        "{\"message\":\"no timestamp\"}\n"
+        "{\"timestamp\":\"2026-01-03T00:00:00Z\",\"message\":\"last\"}\n";
+    casi_buf value = CASI_BUF_INIT;
+
+    ASSERT_TRUE(casi_jsonl_last_string(rows, sizeof(rows) - 1, "timestamp", &value));
+    ASSERT_EQ_STR(casi_buf_cstr(&value), "2026-01-03T00:00:00Z");
+    ASSERT_FALSE(casi_jsonl_last_string(rows, sizeof(rows) - 1, "missing", &value));
+    casi_buf_dispose(&value);
+}
+
 int main(void)
 {
     int status;
@@ -65,6 +79,7 @@ int main(void)
     RUN_TEST(test_escape_and_read_roundtrip);
     RUN_TEST(test_escape_replaces_existing_output);
     RUN_TEST(test_escaped_key_text_is_not_structure);
+    RUN_TEST(test_last_jsonl_string_uses_the_latest_record);
 
     status = casi_test_report("jsonl");
     casi_shutdown();
