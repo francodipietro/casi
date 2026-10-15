@@ -87,6 +87,7 @@ int  casi_fs_dirname(casi_buf *out, const char *path);
 /* Whether stdout is a terminal. Lives here rather than in the logger because
  * isatty() is a syscall, and on Windows becomes _isatty()/GetConsoleMode(). */
 bool casi_fs_stdout_is_tty(void);
+bool casi_fs_stdin_is_tty(void);
 
 /* Whether stderr is a terminal -- where a self-overwriting progress line is
  * meaningful. Progress stays silent when piped or redirected. */
