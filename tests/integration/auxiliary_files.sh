@@ -29,10 +29,8 @@ printf '# Notes\nPath: %s/docs\n' "$work/a/src/proj" > "$base_a/memory/MEMORY.md
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
 "$casi" push >/dev/null || fail "push from A"
-git -C "$work/remote.git" ls-tree -r --name-only refs/heads/casi/machine-a |
-    grep -q "subagents/agent-one.jsonl" || fail "subagent missing from remote tree"
-git -C "$work/remote.git" ls-tree -r --name-only refs/heads/casi/machine-a |
-    grep -q "memory/MEMORY.md" || fail "memory missing from remote tree"
+# spec002:R1 — encrypted remote names are intentionally opaque; restoration
+# below verifies both auxiliary kinds without relying on plaintext tree names.
 
 # B receives all three kinds under its own encoded project directory.
 mkdir -p "$work/b/code/proj" "$work/b/.claude"

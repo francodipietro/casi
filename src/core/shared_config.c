@@ -233,7 +233,7 @@ int casi_shared_config_load_remote(casi_repo *repo, const casi_crypto *crypto,
         }
         if ((rc = casi_shared_config_parse(cfg, json.ptr, json.len)) != CASI_OK)
             goto done;
-    } else if (format == 2) {
+    } else if (format == 2 || format == 3) {
         if ((rc = encrypted_header_matches(crypto, &json)) != CASI_OK ||
             (rc = casi_crypto_path_component(crypto, "config", &payload_name)) != CASI_OK ||
             (rc = casi_repo_tree_entry_blob_raw(repo, &tree, casi_buf_cstr(&payload_name),
@@ -258,13 +258,49 @@ done:
     return rc;
 }
 
+int casi_shared_config_load_recovery_envelope(casi_repo *repo, casi_buf *out,
+                                              bool *present_out)
+{
+    git_oid tree;
+    casi_buf json = CASI_BUF_INIT;
+    int rc;
+
+    if (present_out != NULL)
+        *present_out = false;
+    casi_buf_clear(out);
+    rc = casi_repo_ref_tree(repo, CASI_SHARED_CONFIG_REMOTE_REF, &tree);
+    if (rc == CASI_ENOTFOUND) {
+        casi_error_clear();
+        rc = CASI_OK;
+        goto done;
+    }
+    if (rc != CASI_OK ||
+        (rc = casi_repo_tree_entry_blob_raw(repo, &tree, "casi.json", &json)) != CASI_OK)
+        goto done;
+    if (casi_json_find_uint(json.ptr, json.len, "format") != 3) {
+        rc = CASI_OK;
+        goto done;
+    }
+    if ((rc = casi_repo_tree_entry_blob_raw(repo, &tree,
+                                            CASI_SHARED_CONFIG_RECOVERY_ENTRY, out)) != CASI_OK)
+        goto done;
+    if (present_out != NULL)
+        *present_out = true;
+
+done:
+    casi_buf_dispose(&json);
+    return rc;
+}
+
 int casi_shared_config_commit_push(casi_repo *repo, const casi_shared_config *cfg,
-                                   const casi_crypto *crypto, const char *machine)
+                                   const casi_crypto *crypto, const char *machine,
+                                   const casi_buf *recovery_envelope)
 {
     casi_tree *tree = NULL;
     casi_buf json = CASI_BUF_INIT, payload_name = CASI_BUF_INIT, cipher = CASI_BUF_INIT,
-             key_id = CASI_BUF_INIT;
+             key_id = CASI_BUF_INIT, preserved_recovery = CASI_BUF_INIT;
     git_oid tree_oid, existing_tree, commit;
+    bool has_recovery = false;
     int rc;
 
     if ((rc = casi_repo_reset_ref_from(repo, CASI_SHARED_CONFIG_REF,
@@ -276,6 +312,14 @@ int casi_shared_config_commit_push(casi_repo *repo, const casi_shared_config *cf
     if (crypto != NULL && crypto->enabled) {
         git_oid payload_oid;
 
+        if (recovery_envelope != NULL && recovery_envelope->len > 0) {
+            has_recovery = true;
+        } else if ((rc = casi_shared_config_load_recovery_envelope(repo,
+                                                                     &preserved_recovery,
+                                                                     &has_recovery)) != CASI_OK) {
+            goto done;
+        }
+
         if ((rc = casi_crypto_path_component(crypto, "config", &payload_name)) != CASI_OK ||
             (rc = casi_crypto_encrypt(crypto, casi_buf_cstr(&payload_name), json.ptr, json.len,
                                       &cipher)) != CASI_OK ||
@@ -283,13 +327,25 @@ int casi_shared_config_commit_push(casi_repo *repo, const casi_shared_config *cf
             goto done;
         casi_buf_clear(&json);
         if ((rc = casi_buf_printf(&json,
-                                  "{\"format\":2,\"crypto\":{\"mode\":\"%s\",\"keyId\":\"%s\"}}\n",
+                                  "{\"format\":%d,\"crypto\":{\"mode\":\"%s\",\"keyId\":\"%s\"}}\n",
+                                  has_recovery ? 3 : 2,
                                   CASI_CRYPTO_MODE_CONVERGENT,
                                   casi_buf_cstr(&key_id))) != CASI_OK ||
             (rc = casi_repo_write_blob_raw(repo, cipher.ptr, cipher.len, &payload_oid)) != CASI_OK ||
             (rc = casi_tree_add_text_raw(tree, "casi.json", casi_buf_cstr(&json))) != CASI_OK ||
             (rc = casi_tree_add(tree, casi_buf_cstr(&payload_name), &payload_oid)) != CASI_OK)
             goto done;
+        if (has_recovery) {
+            const casi_buf *envelope = recovery_envelope != NULL && recovery_envelope->len > 0
+                                     ? recovery_envelope : &preserved_recovery;
+            git_oid envelope_oid;
+
+            if ((rc = casi_repo_write_blob_raw(repo, envelope->ptr, envelope->len,
+                                                &envelope_oid)) != CASI_OK ||
+                (rc = casi_tree_add(tree, CASI_SHARED_CONFIG_RECOVERY_ENTRY,
+                                    &envelope_oid)) != CASI_OK)
+                goto done;
+        }
     } else if ((rc = casi_tree_add_text(tree, "casi.json", casi_buf_cstr(&json))) != CASI_OK) {
         goto done;
     }
@@ -331,5 +387,6 @@ done:
     casi_buf_dispose(&payload_name);
     casi_buf_dispose(&cipher);
     casi_buf_dispose(&key_id);
+    casi_buf_dispose(&preserved_recovery);
     return rc;
 }

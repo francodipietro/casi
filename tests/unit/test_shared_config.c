@@ -140,9 +140,9 @@ static void test_identical_config_retries_an_unpublished_ref(void)
     /* The first failure happens after the local commit was written. The
      * second identical call must retry the push, rather than mistaking that
      * local commit for a successfully published configuration. */
-    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, NULL, "test-machine"),
+    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, NULL, "test-machine", NULL),
               CASI_ENOTFOUND);
-    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, NULL, "test-machine"),
+    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, NULL, "test-machine", NULL),
               CASI_ENOTFOUND);
 
     casi_shared_config_dispose(&cfg);
@@ -172,7 +172,7 @@ static void test_encrypted_shared_config_hides_payload(void)
     ASSERT_OK(casi_shared_config_add_root(&cfg, "private"));
     ASSERT_OK(casi_shared_config_add_exclude(&cfg, "casi://private/client"));
 
-    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, &crypto, "test-machine"),
+    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, &crypto, "test-machine", NULL),
               CASI_ENOTFOUND);
     ASSERT_OK(casi_repo_reset_ref_from(repo, CASI_SHARED_CONFIG_REMOTE_REF,
                                        CASI_SHARED_CONFIG_REF));
@@ -194,6 +194,30 @@ static void test_encrypted_shared_config_hides_payload(void)
     casi_paths_reset();
 }
 
+/* spec002:R1,R3 — the remote stores only an authenticated recovery envelope. */
+static void test_recovery_envelope_roundtrips_from_remote(void)
+{
+    char home[] = "/tmp/casi-shared-recovery-XXXXXX";
+    unsigned char key[CASI_CRYPTO_KEY_BYTES] = { 4 };
+    casi_repo *repo = NULL;
+    casi_shared_config cfg = { 0 };
+    casi_crypto crypto;
+    casi_buf envelope = CASI_BUF_INIT, loaded = CASI_BUF_INIT;
+    bool present = false;
+
+    ASSERT_TRUE(mkdtemp(home) != NULL);
+    ASSERT_EQ_INT(setenv("CASI_HOME", home, 1), 0); casi_paths_reset();
+    ASSERT_OK(casi_repo_init(&repo)); ASSERT_OK(casi_crypto_from_key(&crypto, key));
+    ASSERT_OK(casi_crypto_recovery_wrap(key, "spec002 passphrase", &envelope));
+    ASSERT_RC(casi_shared_config_commit_push(repo, &cfg, &crypto, "test-machine", &envelope), CASI_ENOTFOUND);
+    ASSERT_OK(casi_repo_reset_ref_from(repo, CASI_SHARED_CONFIG_REMOTE_REF, CASI_SHARED_CONFIG_REF));
+    ASSERT_OK(casi_shared_config_load_recovery_envelope(repo, &loaded, &present));
+    ASSERT_TRUE(present); ASSERT_EQ_MEM(envelope.ptr, loaded.ptr, envelope.len);
+
+    casi_buf_dispose(&envelope); casi_buf_dispose(&loaded); casi_crypto_dispose(&crypto);
+    casi_shared_config_dispose(&cfg); casi_repo_free(repo); unsetenv("CASI_HOME"); casi_paths_reset();
+}
+
 int main(void)
 {
     int status;
@@ -209,6 +233,7 @@ int main(void)
     RUN_TEST(test_parse_enforces_shared_config_invariants);
     RUN_TEST(test_identical_config_retries_an_unpublished_ref);
     RUN_TEST(test_encrypted_shared_config_hides_payload);
+    RUN_TEST(test_recovery_envelope_roundtrips_from_remote);
 
     status = casi_test_report("shared_config");
     casi_shutdown();

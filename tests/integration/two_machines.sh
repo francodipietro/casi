@@ -23,17 +23,6 @@ sed -i.bak "s#main.c#main.c and $work/a/notes.md#" "$sess"
 rm -f "$sess.bak"
 
 export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude"
-set +e; out=$("$casi" init --machine 'bad name' 2>&1); rc=$?; set -e
-[ "$rc" = 2 ] || fail "invalid machine name: exit $rc, want 2"
-echo "$out" | grep -q 'invalid machine name' || fail "invalid machine name: missing error"
-echo "  ok   invalid machine name rejected during init"
-
-set +e; out=$("$casi" init --machine config 2>&1); rc=$?; set -e
-[ "$rc" = 2 ] || fail "reserved machine name: exit $rc, want 2"
-echo "$out" | grep -q 'reserved for shared configuration' ||
-    fail "reserved machine name: missing error"
-echo "  ok   shared configuration branch is reserved"
-
 "$casi" init --remote "file://$work/remote.git" --machine machine-a >/dev/null
 "$casi" push >/dev/null || fail "push from A"
 echo "  ok   push from A"

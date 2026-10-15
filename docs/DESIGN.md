@@ -77,15 +77,16 @@ removes the performance win. Claude Code's observed transcript writer is
 append-only, while ordinary rewrites with the same or smaller size continue to
 fall back to a full scan and reach the normal prefix-conflict logic.
 
-## Encryption is opt-in and fixes a remote's format from its first writer
+## Encryption and recovery fix a remote's format from its first writer
 
-An encrypted store starts with `casi init --remote <url> --encrypt`. It creates
-32 random bytes in a local `0600` keyfile (or uses the explicit `--keyfile`),
-and never puts that key in Git. A later machine must receive that key through a
-separate user-controlled channel and pass `--encrypt` when it initialises. casi
-does not convert a remote that already has casi data: changing its object and
-tree format in place would make an interrupted migration ambiguous and could
-silently mix protected and unprotected history.
+`casi init <url>` creates a new remote encrypted by default. It prompts for a
+recovery passphrase twice, creates a local `0600` keyfile, and publishes only
+an authenticated recovery envelope. On a later machine, the same command
+detects that envelope, prompts for the passphrase, and writes the keyfile only
+after successful authentication. The passphrase and master key never appear in
+arguments, configuration, logs, or plaintext remote objects. Existing plain
+remotes remain plain; existing encrypted remotes without an envelope still
+require an explicitly copied keyfile.
 
 The remote configuration retains only a small cleartext format-2 header with
 the mode and a non-secret keyed identifier. It tells a joining client which

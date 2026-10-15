@@ -23,6 +23,7 @@
 #define CASI_SHARED_CONFIG_FORMAT 1
 #define CASI_SHARED_CONFIG_REF "refs/heads/casi/config"
 #define CASI_SHARED_CONFIG_REMOTE_REF "refs/remotes/origin/casi/config"
+#define CASI_SHARED_CONFIG_RECOVERY_ENTRY "recovery"
 
 typedef struct {
     casi_strvec roots;    /* logical names; never the implicit "~" root */
@@ -49,10 +50,15 @@ bool casi_shared_config_is_excluded(const casi_shared_config *cfg,
 int casi_shared_config_load_remote(casi_repo *repo, const casi_crypto *crypto,
                                    casi_shared_config *cfg,
                                    bool *present_out);
+/* Reads the optional recovery envelope from an encrypted config ref without
+ * requiring the encryption key. A missing envelope leaves present_out false. */
+int casi_shared_config_load_recovery_envelope(casi_repo *repo, casi_buf *out,
+                                              bool *present_out);
 /* Commits cfg onto the freshly fetched config ref and pushes it. A concurrent
  * update returns CASI_ERETRY so the caller can refetch, replay its mutation,
  * and try again. */
 int casi_shared_config_commit_push(casi_repo *repo, const casi_shared_config *cfg,
-                                   const casi_crypto *crypto, const char *machine);
+                                   const casi_crypto *crypto, const char *machine,
+                                   const casi_buf *recovery_envelope);
 
 #endif /* CASI_SHARED_CONFIG_H */

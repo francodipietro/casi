@@ -15,7 +15,7 @@ do not want to think about. There are no branches, no commits, no merges, no
 rebases. There are five commands:
 
 ```
-casi init --remote <url>   # point it at any git remote you control
+casi init <url>            # connect and securely initialize or join a remote
 casi push                  # send this machine's sessions
 casi pull                  # bring in the other machines'
 casi sync                  # pull, resolve safely, then push
@@ -138,10 +138,10 @@ reports the choices it would make from the last fetched remote view.
 casi speaks git, not a vendor API. Anything git can push to, casi can push to:
 
 ```
-casi init --remote git@github.com:you/my-sessions.git
-casi init --remote https://gitea.example.org/you/my-sessions.git
-casi init --remote ssh://you@nas.local/srv/git/my-sessions.git
-casi init --remote file:///Volumes/usb/my-sessions.git
+casi init git@github.com:you/my-sessions.git
+casi init https://gitea.example.org/you/my-sessions.git
+casi init ssh://you@nas.local/srv/git/my-sessions.git
+casi init file:///Volumes/usb/my-sessions.git
 ```
 
 Your sessions are yours. casi has no server, no account and no telemetry.

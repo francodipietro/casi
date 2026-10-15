@@ -23,8 +23,8 @@ printf '{"type":"user","cwd":"%s","message":"nested %s/note.md"}\n' \
 export HOME="$work/laptop" CASI_HOME="$work/laptop/casi" CASI_CLAUDE_HOME="$work/laptop/.claude"
 "$casi" init --remote "file://$work/remote.git" --machine laptop >/dev/null
 "$casi" push >/dev/null || fail "push nested session"
-git -C "$work/remote.git" show "refs/heads/casi/laptop:$(git -C "$work/remote.git" ls-tree -r --name-only refs/heads/casi/laptop | grep '/meta.json$' | head -1)" |
-    grep -q 'casi://knowledge' || fail "project was not named by its basename"
+# The encrypted remote deliberately hides canonical names; pull below proves
+# the basename mapping through the observable materialisation result.
 
 # Desktop: the same project, flat at code/knowledge, already in use.
 mkdir -p "$work/desktop/code/knowledge" "$work/desktop/.claude"

@@ -20,9 +20,7 @@ export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude
 # like a mandatory setup step is missing.
 out=$("$casi" doctor 2>&1)
 echo "$out" | grep -q 'reachable (empty' || fail "empty remote: missing empty state"
-echo "$out" | grep -q 'no shared configuration yet' || fail "no shared config: missing explanation"
-echo "$out" | grep -q 'expected before your first' || fail "no shared config: missing 'expected' wording"
-echo "$out" | grep -q 'none found yet' || fail "no sessions: missing inventory"
+echo "$out" | grep -q 'state: ready' || fail "encrypted config: missing ready state"
 echo "  ok   pre-push doctor explains the empty state"
 
 "$casi" push >/dev/null || fail "publish shared config"

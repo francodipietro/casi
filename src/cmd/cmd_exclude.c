@@ -79,7 +79,7 @@ static int run(int argc, char **argv, bool excluding)
             }
             if (rc == CASI_OK)
                 rc = casi_shared_config_commit_push(ctx.repo, &shared, &ctx.crypto,
-                                                     ctx.machine);
+                                                     ctx.machine, NULL);
 
 update_done:
             casi_shared_config_dispose(&shared);
