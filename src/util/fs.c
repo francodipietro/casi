@@ -606,6 +606,11 @@ bool casi_fs_stdout_is_tty(void)
     return isatty(STDOUT_FILENO) ? true : false;
 }
 
+bool casi_fs_stdin_is_tty(void)
+{
+    return isatty(STDIN_FILENO) ? true : false;
+}
+
 bool casi_fs_stderr_is_tty(void)
 {
     return isatty(STDERR_FILENO) ? true : false;

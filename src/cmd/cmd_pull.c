@@ -6,6 +6,7 @@
 
 #include <inttypes.h>
 #include <string.h>
+#include <time.h>
 
 static void report_unmapped(const casi_buf *root)
 {
@@ -160,9 +161,11 @@ static int write_conflict_meta(const char *path, const casi_entry *entry,
     rc = casi_buf_printf(&json,
                          "{\"sessionId\":\"%s\",\"project\":\"%s\","
                          "\"originMachine\":\"%s\",\"side\":\"%s\","
-                         "\"bytes\":%" PRIu64 ",\"updatedAt\":%" PRIu64 "}\n",
+                         "\"bytes\":%" PRIu64 ",\"updatedAt\":%" PRIu64 ","
+                         "\"parkedAt\":%" PRIu64 "}\n",
                          casi_buf_cstr(&sid), casi_buf_cstr(&project),
-                         casi_buf_cstr(&m), side, entry->bytes, entry->updated_at);
+                         casi_buf_cstr(&m), side, entry->bytes, entry->updated_at,
+                         (uint64_t)time(NULL));
     if (rc == CASI_OK)
         rc = casi_fs_write_file_atomic(casi_buf_cstr(&meta_path), json.ptr, json.len);
 
@@ -195,7 +198,8 @@ static int park_conflict(casi_ctx *ctx, const casi_entry *entry, const char *sid
     if (rc == CASI_OK) {
         const char *machine = entry->origin_machine != NULL
                             ? entry->origin_machine : ctx->machine;
-        int mrc = write_conflict_meta(casi_buf_cstr(&path), entry, machine, side);
+        int mrc = already ? CASI_OK :
+            write_conflict_meta(casi_buf_cstr(&path), entry, machine, side);
 
         if (mrc != CASI_OK) {
             casi_error_clear();

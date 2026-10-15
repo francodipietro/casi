@@ -24,6 +24,13 @@ repository locking needed while it repacks; the wrapper lives in `util/fs.c`
 so a future Windows port has one process boundary to replace. Normal sync
 never depends on the executable and never invokes it.
 
+Parked conflicts are separate local files, not unreachable Git objects. Their
+sidecar records `parkedAt` when the copy is first created, so re-observing the
+same content cannot extend its retention. `casi gc` reports copies at least 30
+days old before it removes anything and requires an interactive confirmation or
+an explicit `--yes`. Sidecars created before `parkedAt` are intentionally kept:
+the transcript's activity time is not evidence of when it was archived.
+
 ## Session files are chunked, not stored whole
 
 Claude Code transcripts are append-only JSONL and can reach hundreds of

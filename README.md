@@ -116,6 +116,15 @@ pending, which is useful when deliberately comparing two conversations.
 session, archive a copy, update Casi's object store, or refresh its cache. It
 reports the choices it would make from the last fetched remote view.
 
+## Local conflict retention
+
+`casi gc` repacks the local store and previews archived conflict copies that
+were parked at least 30 days ago. It asks before deleting them; when stdout or
+stdin is not interactive it only reports the plan. Use `casi gc --yes` only
+after reviewing that plan. Cleanup is local: it never changes transcripts, the
+remote, or active conflicts. Older archives without a recorded parking date
+are preserved.
+
 ## Why not just rsync / Dropbox / a git repo of ~/.claude
 
 - **Sessions embed absolute paths.** `/home/franco/dev/app` on Linux is
