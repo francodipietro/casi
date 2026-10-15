@@ -154,7 +154,7 @@ int casi_ctx_publish_shared_config(casi_ctx *ctx)
             rc = casi_shared_config_add_exclude(&shared, legacy.items[i]);
         if (rc == CASI_OK)
             rc = casi_shared_config_commit_push(ctx->repo, &shared, &ctx->crypto,
-                                                 ctx->machine);
+                                                 ctx->machine, NULL);
 
 done:
         casi_strvec_dispose(&legacy);

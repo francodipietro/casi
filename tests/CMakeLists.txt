@@ -66,8 +66,10 @@ set(CASI_INTEGRATION_TESTS
 )
 foreach(test_name IN LISTS CASI_INTEGRATION_TESTS)
     add_test(NAME ${test_name}
-        COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/integration/${test_name}.sh
-                $<TARGET_FILE:casi> ${CMAKE_CURRENT_BINARY_DIR}/tmp/${test_name})
+        COMMAND ${CMAKE_COMMAND} -E env CASI_REAL=$<TARGET_FILE:casi>
+                sh ${CMAKE_CURRENT_SOURCE_DIR}/integration/${test_name}.sh
+                ${CMAKE_CURRENT_SOURCE_DIR}/integration/casi_spec002_wrapper.sh
+                ${CMAKE_CURRENT_BINARY_DIR}/tmp/${test_name})
 endforeach()
 
 add_test(NAME backup_script

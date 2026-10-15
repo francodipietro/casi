@@ -24,6 +24,12 @@ export HOME="$work/a" CASI_HOME="$work/a/casi" CASI_CLAUDE_HOME="$work/a/.claude
 git -C "$work/a/casi/repo.git" fsck --no-dangling >/dev/null || fail "gc left an invalid store"
 printf '{"type":"assistant","cwd":"%s","message":"after gc"}\n' "$work/a/src/p" >> "$session"
 "$casi" push >/dev/null || fail "push after gc"
-git -C "$work/remote.git" grep -q 'after gc' refs/heads/casi/machine-a ||
+mkdir -p "$work/b/src/p" "$work/b/.claude"
+encoded_b=$(echo "$work/b/src/p" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$work/b/.claude/projects/$encoded_b"
+export HOME="$work/b" CASI_HOME="$work/b/casi" CASI_CLAUDE_HOME="$work/b/.claude"
+"$casi" init --remote "file://$work/remote.git" --machine machine-b >/dev/null
+"$casi" pull >/dev/null || fail "pull after gc"
+grep -q 'after gc' "$work/b/.claude/projects/$encoded_b/bbbbbbbb-0000-0000-0000-000000000000.jsonl" ||
     fail "append was not pushed after gc"
 echo "gc: 1 passed"

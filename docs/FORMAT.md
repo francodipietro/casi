@@ -123,10 +123,13 @@ not the machine-snapshot format number.
 
 ## Encrypted stores
 
-Encryption is selected when an otherwise empty remote is initialized with
-`casi init --encrypt`. It is a property of the remote: casi does not convert a
-remote that already contains a machine or configuration ref. A joining machine
-must have received the same private local key through a separate channel.
+An otherwise empty remote is encrypted when initialized with `casi init <url>`.
+Its format is fixed: casi does not convert an existing remote. The encrypted
+configuration uses format 3 when it includes a raw `recovery` entry containing
+the authenticated `CASIREC1` envelope. A joining machine supplies its recovery
+passphrase interactively; only successful authentication creates its private
+local keyfile. Format 2 remains readable for encrypted remotes that predate
+recovery and therefore require an explicitly copied keyfile.
 
 ### Key and blobs
 
